@@ -1,0 +1,30 @@
+{
+  "name": "goldenhour-backend",
+  "version": "2.0.0",
+  "description": "GoldenHour backend \u2014 broadcast fan-out to two hardcoded hospital laptops, first accept wins.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "license": "ISC",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "demo": "node src/server.js --memory",
+    "test": "node tests/broadcast.e2e.test.js && node tests/desk-auth.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js",
+    "test:auth": "node tests/desk-auth.test.js",
+    "test:patient": "node tests/patient-edit.test.js",
+    "test:arrival": "node tests/arrival-lifecycle.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.0",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

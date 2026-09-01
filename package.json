@@ -1,0 +1,17 @@
+{
+  "name": "goldenhour-master",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GoldenHour — ambulance pre-arrival alert. Ambulance app + backend + hospital desk in one repo, wired together for the internal hackathon.",
+  "license": "MIT",
+  "scripts": {
+    "setup": "npm --prefix backend install && npm --prefix app install",
+    "start": "npm --prefix backend start",
+    "dev": "npm --prefix backend run dev",
+    "demo": "npm --prefix backend run demo",
+    "test": "npm --prefix app test && npm --prefix backend test",
+    "test:app": "npm --prefix app test",
+    "test:backend": "npm --prefix backend test",
+    "apk": "npm --prefix app run apk"
+  }
+}
