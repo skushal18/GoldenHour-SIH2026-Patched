@@ -20,7 +20,7 @@
 
 window.GH_CONFIG = {
   /* "" = auto-detect from the page URL. Set explicitly for the APK. */
-  SERVER_BASE: "",
+  SERVER_BASE: "http://10.115.86.78:5000",
 
   API_PATH: "/api/v1",
 
