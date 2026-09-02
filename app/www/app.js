@@ -1501,7 +1501,7 @@ function renderActiveCase(flash) {
   var v = (p && p.vitals) || {};
   var name = "Patient";
   setText($("activeCaseCode"), activeCase.id);
-  setText($("activeHospital"), activeCase.accepted_by || "—");
+  setText($("activeFacility"), activeCase.accepted_by || "—");
   setText($("activeStatusLabel"), String(activeCase.status || "").toUpperCase());
   setText($("activePatientName"), (p.age !== undefined && p.age !== null) ? ("Patient · age " + p.age) : "Patient");
   setText($("activeBlood"),      p.blood_group || "—");

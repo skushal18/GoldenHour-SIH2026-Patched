@@ -379,7 +379,7 @@
         <div class="active-case-title">
           <span class="active-case-tag">Active case · en route</span>
           <b id="activeCaseCode">—</b>
-          <span class="active-hospital" id="activeHospital">—</span>
+          <span class="active-hospital" id="activeFacility">—</span>
         </div>
         <span id="activeStatusLabel" class="status-chip status-accepted">✓ ACCEPTED</span>
       </div>
@@ -429,9 +429,15 @@
         <span class="inputwrap inputwrap-sm"><input id="editAge" type="number" inputmode="numeric" min="0" max="120" step="1" placeholder="—" aria-label="Age in years"><span class="unit">yrs</span></span>
       </label>
       <label class="field"><span class="lbl">Sex</span>
-        <span class="selectwrap"><select id="editGender"><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option><option value="U" selected>Unknown</option></select></span>
-      </label>
-      <div class="field"><span class="lbl">Blood group</span>
+  <div id="editGender" class="seg">
+    <button type="button" class="seg-btn" data-value="M">Male</button>
+    <button type="button" class="seg-btn" data-value="F">Female</button>
+    <button type="button" class="seg-btn" data-value="O">Other</button>
+    <button type="button" class="seg-btn is-on" data-value="U">Unknown</button>
+  </div>
+</label>
+
+<div class="field"><span class="lbl">Blood group</span>
         <div id="editBloodRow" class="chipgrid">
           <input type="hidden" id="editBlood" value="">
           <button type="button" class="chip" data-blood="O+">O+</button>
