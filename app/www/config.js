@@ -9,7 +9,7 @@
    Inside the Android APK there is no server to infer, so put the server
    laptop's LAN address here before you run `npm run apk`:
 
-       SERVER_BASE: "http://192.168.1.100:5000"
+       SERVER_BASE: "https://goldenhour-sih2026-patched-production.up.railway.app"
 
    Find that address by starting the backend — it prints it in the banner.
 
@@ -20,7 +20,7 @@
 
 window.GH_CONFIG = {
   /* "" = auto-detect from the page URL. Set explicitly for the APK. */
-  SERVER_BASE: "http://10.115.86.78:5000",
+  SERVER_BASE: "https://goldenhour-sih2026-patched-production.up.railway.app",
 
   API_PATH: "/api/v1",
 
