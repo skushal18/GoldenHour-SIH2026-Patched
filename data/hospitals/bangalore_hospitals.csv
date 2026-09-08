@@ -1,0 +1,94 @@
+Hospital Name,Type,Zone,Area,Address,Phone,Category,Notes
+Victoria Hospital,Government,Central/South,Fort/K.R. Road,"Fort Road, Bengaluru 560002",080-26701150,"Multi-specialty, Teaching",Attached to Bangalore Medical College and Research Institute; one of the largest govt hospitals in the city
+Bangalore Medical College and Research Institute (BMCRI),Government,Central/South,Fort/K.R. Road,"Fort, K.R. Road, Bangalore 560002",080-26701529,General/Teaching,"1,160 beds; parent institute for Victoria Hospital & Vani Vilas Hospital"
+Vani Vilas Hospital,Government,Central/South,Fort/K.R. Road,"K.R. Road, Fort, Bengaluru 560002",080-26703224,Women & Children,"Maternity, high-risk pregnancy, neonatology"
+Bowring and Lady Curzon Hospital,Government,Central,Shivajinagar,"Shivajinagar, Bengaluru",080-25580262,"General, Teaching","150+ years old; general medicine, surgery, ENT, dermatology, ophthalmology, obstetrics"
+"ESI Hospital, Rajajinagar",Government,West,Rajajinagar,"2nd Block, Rajajinagar, Bengaluru 560010",080-23125522,General,Central govt (ESI scheme) hospital
+KC General Hospital,Government,Central/West,Malleshwaram,"Malleshwaram, Bengaluru",,General,
+Kidwai Memorial Institute of Oncology,Government,South,Hombegowda Nagar/Hosur Road,Bengaluru,,Oncology (Cancer),State-run cancer referral centre
+Sri Jayadeva Institute of Cardiovascular Sciences and Research,Government,South,Jayanagar 9th Block,"Bannerghatta Road, Jayanagar 9th Block, Bengaluru 560069",080-22977602,Cardiac Specialty,550 beds; also has a North Campus near Hebbal
+Sri Jayadeva Institute - Hebbal (North Campus),Government,North,Hebbal,"Malur Road, near Hebbal, Bengaluru",080-22938000,Cardiac Specialty,
+NIMHANS (National Institute of Mental Health & Neurosciences),Government,South,Hosur Road/Lakkasandra,"Hosur Road, Bengaluru 560029",,Mental Health & Neurosciences,Institute of National Importance
+Indira Gandhi Institute of Child Health (IGICH),Government,South,Sudhama Nagar,"Hosur Rd, Sudhama Nagar, Bangalore 560029",080-22233885,Pediatric,
+SDS Tuberculosis Research Centre & Rajiv Gandhi Institute of Chest Diseases,Government,South,Hosur Road,Bengaluru,,Chest/Respiratory Diseases,
+Karnataka Institute of Endocrinology and Research,Government,Central/South,Fort area,Bengaluru,,Endocrinology,
+Sir C V Raman General Hospital,Government,East,Old Airport Road area,Bengaluru,080-25281245,General,AB-Arogya Karnataka empanelled
+H Siddaiah Road Referral Hospital (BBMP),Government,Central/South,H Siddaiah Road,"Off J.C. Road, next to Lions Eye Hospital, Bengaluru 560002",080-22975785,General/Referral,BBMP referral hospital
+Banashankari Referral Hospital (BBMP),Government,South,Banashankari,"27th Cross, 17th Main, BSK 2nd Stage, Bengaluru 560070",,General/Referral,BBMP referral hospital
+Ulsoor Referral Hospital (BBMP),Government,East,Ulsoor,"Cambridge Road, near Ulsoor Police Station, Bengaluru 560008",080-22975876,General/Referral,BBMP referral hospital
+Hosahalli Referral Hospital (BBMP),Government,West,Vijayanagar,"5th Main Rd, M.C. Layout, Vijayanagar, Bengaluru 560040",080-22975766,General/Referral,BBMP referral hospital
+Jayanagar General Hospital (BBMP),Government,South,Jayanagar,"Jayanagar, Bengaluru",,General,
+KR Puram General Hospital,Government,East,KR Puram,"Krishnarajapuram, Bengaluru",,General,
+BBMP Madiwala Hospital,Government,South,BTM Layout,"56, 1st Cross Rd, 1st Stage, BTM Layout, Bengaluru 560068",,General,
+Beguru Government Hospital,Government,South,Bommanahalli,"Begur Main Rd, Classic Paradise Layout, Bommanahalli, Bengaluru 560068",074883 12569,General,
+"Government Hospital, Hebbagodi",Government,South,Bommasandra/Electronic City,"Thirupalya, Bommasandra, Bengaluru 560099",,General,
+Bommasandra ESI Hospital,Government,South,Bommanahalli/Electronic City,"Agrahara, Bommanahalli, Bengaluru",098868 12853,General (ESI),
+"Government Hospital, Basaveshwar Nagar",Government,West,Basaveshwar Nagar,"Basaveshwar Nagar, Bengaluru 560079",,General,
+"Government Hospital, Rajajinagar",Government,West,Rajajinagar,"20th Main Rd, 5th Block, 3rd Block, Rajajinagar, Bengaluru 560010",,General,
+"Government Maternity Hospital, Banashankari (Srinagar)",Government,South,Banashankari,"Srinagar, Banashankari Stage I, Bengaluru 560026",,Maternity,
+"Government Hospital, Kengeri",Government,West,Kengeri,"Kengeri Main Rd, BDA Layout, Nagarbhavi, Bengaluru 560056",,General,
+"Fortis Hospital, Cunningham Road",Private,Central,Vasanth Nagar,"14, Cunningham Rd, near Sigma Central Mall, Vasanth Nagar, Bengaluru",096868 60310,Multi-specialty,
+"Manipal Hospital, Millers Road",Private,Central,Vasanth Nagar,"71/1, Millers Rd, opp. St. Anne's College, Vasanth Nagar, Bengaluru",1800-102-4647,Multi-specialty,
+"Vikram Hospital, Millers Road",Private,Central,Millers Road,"No.71/1, Millers Road, Bengaluru",,Multi-specialty,
+Citizen Hospital,Private,Central,Kalasipalya,"Dispensary Rd, 2nd Phase, Kalasipalya, Bengaluru",080-43943355,General,
+St. Martha's Hospital,Private,Central,Ulsoor,"Near Ulsoor Lake, Ulsoor Rd, Bengaluru",080-25594520,"General, Trust hospital",
+St. John's Medical College Hospital,Private,South/Central,Koramangala/Sarjapur Road,"Sarjapur Road, Koramangala, Bengaluru 560034",080-22065000,"Multi-specialty, Teaching",Major private teaching hospital; wide specialty coverage
+Pristine Hospital,Private,West,Basaveshwar Nagar,"877, Modi Hospital Rd, West of Chord Road, Basaveshwar Nagar, Bengaluru",080-41354444,Multi-specialty,
+Rajajinagar Hospital,Private,West,Rajajinagar,"1st Block, Rajajinagar, Bengaluru",080-23149100,General,
+"BGS HealthCare Hospital, Rajajinagar",Private,West,Rajajinagar,"Rajajinagar, Bengaluru",080-26718899,Multi-specialty,
+M.S. Ramaiah Memorial Hospital,Private,West/North,MSR Nagar,"MSRIT Post, New BEL Road, Bengaluru 560054",080-23608888,"Multi-specialty, Teaching","Nephrology, urology, dialysis, transplant, neurology"
+"Columbia Asia Referral Hospital, Malleshwaram",Private,West,Malleshwaram,"Malleshwaram, Bengaluru",,Multi-specialty,
+Bangalore Baptist Hospital,Private (Trust),North,Hebbal,"Near Manyata Tech Park, Hebbal, Bengaluru",,Multi-specialty,Mission/trust hospital
+"SPARSH Hospital, Yeshwanthpur",Private,West/North,Yeshwanthpur,"Yeshwanthpur Industrial Area, Phase 1, Bengaluru 560022",,Ortho/Multi-specialty,
+"Apollo Hospitals, Hebbal",Private,North,Hebbal,"Near Hebbal Flyover, Hebbal Road, Bengaluru",080-26561234,Multi-specialty,
+Aster CMI Hospital,Private,North,Hebbal,"Hebbal Industrial Area, Bengaluru",080-23677676,"Multi-specialty, Tertiary care",
+"Columbia Asia Hospital, Yelahanka",Private,North,Yelahanka,"Yelahanka New Town, Bengaluru",080-67069000,Multi-specialty,
+"Narayana Multispeciality Hospital, Hebbal",Private,North,Hebbal,"Hebbal Industrial Area, Bengaluru",080-66082000,Multi-specialty,
+Sakra World Hospital,Private,North/East,Hebbal/Outer Ring Road,"Outer Ring Road, Devarabeesanahalli, Bengaluru",080-49366633,"Multi-specialty, JCI accredited",
+People Tree Hospitals,Private,North,Hebbal / Yeshwanthpur,"Tumkur Road, Bengaluru",080-26999955,Multi-specialty,
+Cytecare Cancer Hospitals,Private,North,Yelahanka,"Near Bagalur Cross, Bangalore-Hyderabad Highway, Yelahanka, Bengaluru 560064",,Oncology,
+"Manipal Hospital, Yelahanka",Private,North,Yelahanka,"Yelahanka, Bengaluru",1800-102-4647,Multi-specialty,
+NDR Multi Speciality Hospital,Private,North,Yelahanka,"Kogilu Main Road, Maruthi Nagar, Yelahanka, Bengaluru",,Multi-specialty,
+"K K Hospital, Yelahanka",Private,North,Yelahanka New Town,"A Sector, Opp MEC School, Yelahanka New Town, Bengaluru 560064",,General,
+Krishna Rajendra Hospital,Private,North,Vidyaranyapura,"Vidyaranyapura, Bengaluru",080-22435656,General,
+"Manipal Hospital, Whitefield",Private,East,Whitefield,"#143, EPIP Industrial Area, Off Hoodi Village, KR Puram Hobli, Whitefield, Bengaluru 560066",080-22221111,Multi-specialty,"284 beds; ICU, NICU, cardiac care unit"
+"Columbia Asia Hospital, Whitefield",Private,East,Whitefield,"Varthur Main Rd, Whitefield, Bengaluru",080-67069000,Multi-specialty,
+"Columbia Asia Hospital, Brookefield",Private,East,Brookefield,"Varthur Main Rd, Brookefield, Bengaluru",080-67059000,Multi-specialty,
+Vydehi Institute of Medical Sciences & Research,Private,East,Whitefield,"Whitefield Main Rd, Bengaluru",080-28470800,"Multi-specialty, Teaching",Large tertiary hospital
+"Narayana Multispeciality Hospital, Whitefield (Hope Farm)",Private,East,Whitefield,"Hope Farm, Whitefield, Bengaluru",080-66082000,Multi-specialty,
+"Narayana Hrudayalaya, Kaggadasapura",Private,East,Kaggadasapura,"Kaggadasapura, Bengaluru",080-66114646,Cardiac/Multi-specialty,
+"Sparsh Hospital, Whitefield",Private,East,Whitefield,"Whitefield Main Rd, Bengaluru",080-40502222,Ortho/Multi-specialty,
+"Cloudnine Hospital, Whitefield",Private,East,Whitefield,"ITPL Rd, Whitefield, Bengaluru",,Women & Children,
+Healing Hands Hospital,Private,East,Whitefield,"Whitefield, Bengaluru",080-22940606,Proctology/Multi-specialty,
+"Vikram Hospital, Whitefield",Private,East,Whitefield,"Whitefield, Bengaluru",080-26541212,Multi-specialty,
+MGA Hospital,Private,East,Marathahalli,"96, Varthur Main Road, Marathahalli, Bengaluru",,General,
+"Manipal Hospital, Varthur Road (formerly Columbia Asia)",Private,East,Varthur Road,"Varthur Road, Bengaluru",,Multi-specialty,
+"Narayana Nethralaya, Indiranagar",Private,East/Central,Indiranagar,"#1/1, 1st Main Road, Defence Colony, 100ft Road, Indiranagar, Bengaluru",,Eye Care (Specialty),
+Sri Sathya Sai Institute of Higher Medical Sciences,Private (Trust),East,Whitefield,"EPIP Area, Whitefield, Bengaluru 560066",,"Multi-specialty, Free treatment",Charitable trust hospital
+"Manipal Hospitals, Jayanagar",Private,South,Jayanagar 9th Block,"45th Cross Rd, 9th Block, Jayanagar, Bengaluru",1800-102-4647,Multi-specialty,80 beds
+"Apollo Hospitals, Jayanagar",Private,South,Jayanagar,"#21/2, 14th Cross Road, near Madhavan Park Circle, Jayanagar, Bengaluru 560011",080-46124444,Multi-specialty,
+"Apollo Speciality Hospital, Jayanagar",Private,South,Jayanagar,"Jayanagar, Bengaluru",,Super-specialty,150 beds
+"Apollo Cradle & Children's Hospital, Jayanagar",Private,South,Jayanagar 5th Block,"Jayanagar 5th Block, Bengaluru",098216 56657,Women & Children,
+BGS Global Hospital,Private,South/West,Kengeri/Mysore Road,"No. 41, Mysore Road, Banashankari, Bengaluru",080-28450400,Multi-specialty,
+Rainbow Children's Hospital,Private,South,JP Nagar / Kanakapura Road,"Kanakapura Road, JP Nagar, Bengaluru",080-42060400,Pediatric,
+Aster RV Hospital,Private,South,JP Nagar/Banashankari,"Banashankari 3rd Stage, Bengaluru",080-25071111,Multi-specialty,
+"Cloudnine Hospital, JP Nagar",Private,South,JP Nagar 4th Phase,"JP Nagar 4th Phase, Bengaluru",080-67676767,Women & Children,
+"Vikram Hospital, JP Nagar",Private,South,JP Nagar,"JP Nagar, Bengaluru",080-26541212,Multi-specialty,
+"Sagar Hospitals, Jayanagar/Banashankari",Private,South,"Tilak Nagar, Jayanagar","45/1, 45th Cross, Marenahalli Road, Phase II, Jayanagar 9th Block, Bengaluru 560069",080-69555555,Multi-specialty,
+Southern Railway Hospital,Private/Trust,South,Jayanagar 3rd Block,"3rd Block, Jayanagar, Bengaluru",080-26562565,General,
+"Fortis Hospital, Bannerghatta Road",Private,South,Bannerghatta Road,"Bannerghatta Road, Bengaluru",,Multi-specialty,"Burns, poisoning, cardiac, neuro emergencies"
+"Apollo Hospital, Bannerghatta Road",Private,South,Bannerghatta Road,"Bannerghatta Road, Bengaluru",,"Multi-specialty, JCI accredited","250 beds; ECMO, robotic surgery"
+Narayana Health City (Mazumdar Shaw Medical Centre),Private,South,Bommasandra/Electronic City,"258/A, Bommasandra Industrial Area, Anekal Taluk, Hosur Road, Bengaluru 560099",1800-309-0309,"Multi-specialty, Cardiac",Large campus incl. Narayana Institute of Cardiac Sciences
+"Sparsh Hospital, Hosur Road (Bommasandra)",Private,South,Bommasandra/Electronic City,"29/P2, Sparsh Hospital Road, Bommasandra Industrial Area, Bengaluru 560099",,Multi-specialty,24x7 emergency; NABH accredited
+"Narayana Nethralaya, Bommasandra",Private,South,Bommasandra/Electronic City,"258/A, Narayana Health City, Bommasandra, Hosur Road, Bengaluru 560099",080-66660655,Eye Care,
+Nalanda Hospital,Private,South,JP Nagar,"JP Nagar, Bengaluru",080-26780001,General,
+Green City Hospital,Private,South,JP Nagar 6th Phase,"JP Nagar 6th Phase, Bengaluru",,Multi-specialty,
+Milann Fertility & Birthing Hospital,Private,South,JP Nagar 1st Phase,"JP Nagar 1st Phase, Bengaluru",,Fertility/Maternity,
+Blossom Multispecialty Hospital,Private,South,Electronic City,"98, Naganathpura Village, Hosa Road, Electronic City Post, Bengaluru",,Multi-specialty,
+Springleaf Healthcare,Private,South,Electronic City,"60/3, Konappana Agrahara, Hosur Main Road, Bengaluru",080-67345000,Multi-specialty,
+Sri Lakshmi Hospital,Private,South,Electronic City,"Electronic City, Bengaluru",,General,
+Vimalalaya Hospital,Private,South,Huskur Gate/Electronic City,"Huskur Gate, Hosur Road, Bengaluru",,General,
+Sri Siva Sai Multi Speciality Hospital,Private,South,HSR Layout,"#120/4, Haralur Road, Off Sarjapur Road, HSR Layout, Bengaluru",,Multi-specialty,
+"Apollo Spectra Hospitals, Koramangala",Private,Central/South,Koramangala,"Opus, 143, 1st Cross Rd, KHB Colony, 5th Block, Koramangala, Bengaluru 560034",,"Multi-specialty, Day-care surgery",
+"Apollo Cradle & Children's Hospital, Koramangala",Private,Central/South,Koramangala,"58A, 60 Feet Rd, KHB Colony, 6th Block, Koramangala, Bengaluru 560047",,Women & Children,
+"Manipal Hospital, Old Airport Road",Private,Central/East,Old Airport Road,"Old Airport Road, Bengaluru",1800-102-4647,Multi-specialty,Flagship Manipal campus
