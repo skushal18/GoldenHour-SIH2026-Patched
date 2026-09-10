@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is permitted ONLY for private-network addresses.
+
+  The reason it is permitted at all: the demo and LAN deployments run the
+  backend on http://<laptop>:5000, and an ambulance app that cannot reach its
+  server is useless. The reason it is scoped: a production APK points at the
+  Railway backend over HTTPS, and nothing should be able to downgrade that
+  connection. Android applies this file in preference to
+  android:usesCleartextTraffic, so the attribute on <application> is the
+  fallback for the handful of API levels that ignore this config.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false">
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </base-config>
+
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="true">localhost</domain>
+    <domain includeSubdomains="true">10.0.2.2</domain>
+    <domain includeSubdomains="true">127.0.0.1</domain>
+    <!-- RFC 1918 private ranges: the laptop running the demo backend. -->
+    <domain includeSubdomains="true">192.168.0.0</domain>
+    <domain includeSubdomains="true">10.0.0.0</domain>
+    <domain includeSubdomains="true">172.16.0.0</domain>
+  </domain-config>
+</network-security-config>

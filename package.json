@@ -1,0 +1,19 @@
+{
+  "name": "goldenhour",
+  "version": "5.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Pre-arrival emergency coordination between ambulance crews and hospital emergency departments.",
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "scripts": {
+    "setup": "npm --prefix backend install && npm --prefix app install",
+    "build": "npm --prefix app run build && npm --prefix backend run build:desk",
+    "start": "npm --prefix backend start",
+    "dev": "npm --prefix backend run dev",
+    "demo": "npm --prefix backend run demo",
+    "test": "node shared/design/contrast.check.js && npm --prefix app test && npm --prefix backend test",
+    "apk": "npm --prefix app run apk"
+  }
+}

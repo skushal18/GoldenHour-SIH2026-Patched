@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F1F3F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F141A" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="description" content="GoldenHour — pre-arrival emergency coordination between ambulance crews and hospital emergency departments.">
+<title>GoldenHour</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2325CED1'/%3E%3Cpath d='M22 50h13l7-14 11 24 7-10h18' fill='none' stroke='%23073B3C' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script>
+/* Blocking, so the wrong theme never flashes on a night shift. */
+try{
+  var t = JSON.parse(localStorage.getItem('goldenhour.theme') || '"auto"');
+  if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+}catch(e){}
+</script>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ═══ Top bar ═══════════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 21s-7.5-4.7-7.5-10A4.5 4.5 0 0 1 12 8.4a4.5 4.5 0 0 1 7.5 2.6c0 5.3-7.5 10-7.5 10Z"/>
+          <path d="M9 12h1.6l1-2 1.6 3.4 1-1.4H16"/>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">Golden<em>Hour</em></span>
+        <span class="brand-sub">Pre-arrival emergency coordination</span>
+      </span>
+    </div>
+    <div class="topbar-right">
+      <span class="pill" id="netPill">Checking</span>
+      <button type="button" class="icon-btn" id="themeToggle" aria-label="Change colour theme" title="Change colour theme">◐</button>
+    </div>
+  </header>
+
+  <button type="button" class="banner banner-caution" id="outboxPill" hidden aria-label="Open the queued-cases list">
+    <span id="outboxText">0 cases queued</span>
+    <span class="banner-cta">View</span>
+  </button>
+
+  <div class="banner banner-caution" id="demoBanner" hidden role="status">
+    <span>Demo mode — nothing is sent to a hospital. No backend is configured for this build.</span>
+    <button type="button" class="banner-cta" id="retryConnBtn">Retry</button>
+  </div>
+
+  <div class="banner banner-critical" id="loadError" hidden role="alert">
+    <span id="loadErrorText">The case list could not be loaded.</span>
+    <button type="button" class="banner-cta" id="retryListsBtn">Retry</button>
+  </div>
+
+  <!-- ═══ HOME ═════════════════════════════════════════════════════════ -->
+  <main class="scroll view" id="homeView">
+
+    <section class="hero">
+      <p class="hero-eyebrow">Ready when you are</p>
+      <h1 class="hero-title">Alert every hospital at once</h1>
+      <p class="hero-sub">The first emergency department to accept takes the case. You never pick one.</p>
+      <button type="button" class="btn-primary btn-hero" id="startAlertBtn">Start new alert</button>
+    </section>
+
+    <section class="card" id="activeCaseBox" hidden>
+      <div class="card-head">
+        <h2>Active case</h2>
+        <span class="tag tag-brand" id="activeCaseCode">—</span>
+      </div>
+      <div class="active-grid">
+        <div class="active-fact"><span>Case</span><b id="activePatientName">—</b></div>
+        <div class="active-fact"><span>Patient</span><b id="activeAgeBand">—</b></div>
+        <div class="active-fact"><span>Sex</span><b id="activeGenderLabel">—</b></div>
+        <div class="active-fact"><span>Blood</span><b id="activeBlood">—</b></div>
+        <div class="active-fact"><span>Consciousness</span><b id="activeCondition">—</b></div>
+        <div class="active-fact"><span>Heart rate</span><b id="activeHr">—</b></div>
+        <div class="active-fact"><span>Blood pressure</span><b id="activeBp">—</b></div>
+        <div class="active-fact"><span>SpO<sub>2</sub></span><b id="activeSpo2">—</b></div>
+      </div>
+      <div class="active-status">
+        <div class="active-status-main">
+          <span class="active-status-label">Status</span>
+          <b id="activeStatusText">Waiting for a hospital</b>
+        </div>
+        <div class="active-status-main">
+          <span class="active-status-label">ETA</span>
+          <b id="activeEta">— min</b>
+        </div>
+      </div>
+      <p class="active-facility">Hospital: <b id="activeFacility">—</b></p>
+      <p class="active-case-notes" id="activeNotes">No additional notes</p>
+      <p class="tracking-line" id="activeTracking" hidden><span class="live-dot" aria-hidden="true"></span><span id="trackingText">Sharing location with the accepting hospital</span></p>
+      <p class="ticker" id="updateTicker" role="status"></p>
+      <div class="banner banner-good" id="arrivedBanner" hidden role="status">Arrival recorded. This case is closed.</div>
+      <div class="active-actions">
+        <button type="button" class="btn-secondary" id="continueCaseBtn">Continue case</button>
+        <button type="button" class="btn-secondary" id="editPatientBtn">Edit patient</button>
+        <a class="btn-secondary" id="navBtn" hidden href="#" rel="noopener">Navigate</a>
+        <a class="btn-secondary" id="callBtn" hidden href="#">Call</a>
+        <button type="button" class="btn-ghost" id="delayedBtn">Report delay</button>
+        <button type="button" class="btn-primary" id="arrivedBtn">Reached hospital</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Quick access</h2></div>
+      <div class="quick-list">
+        <button type="button" class="quick-row" data-go="new">
+          <span class="quick-title">New alert</span>
+          <span class="quick-sub">Start a new hospital pre-arrival alert.</span>
+        </button>
+        <button type="button" class="quick-row" data-go="active">
+          <span class="quick-title">Active case</span>
+          <span class="quick-sub" id="quickActiveSub">No case is running.</span>
+        </button>
+        <button type="button" class="quick-row" data-go="cases">
+          <span class="quick-title">Recent cases</span>
+          <span class="quick-sub" id="quickRecentSub">Nothing yet this shift.</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Recent activity</h2></div>
+      <div class="recent-list" id="homeRecentList">
+        <p class="empty-note">Cases you send appear here.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═══ NEW ALERT (the emergency form) ═══════════════════════════════ -->
+  <main class="scroll view" id="formScroll" hidden>
+
+    <section class="card" id="caseCard">
+      <div class="card-head">
+        <h2>What happened</h2>
+        <span class="tag tag-req">Required</span>
+      </div>
+      <p class="card-sub">Tap a common case, or pick from the full list.</p>
+      <div class="chip-row chip-scroll" id="quickCase"></div>
+      <label class="field-label" for="caseType">Case type</label>
+      <select id="caseType" class="select">
+        <option value="">Select a case type…</option>
+      </select>
+      <p class="hint" id="caseTypeHint">Triage priority is worked out by the system from the vitals below.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Patient</h2><span class="tag">Optional</span></div>
+
+      <label class="field-label" for="age">Age</label>
+      <input type="number" id="age" class="input" inputmode="numeric" min="0" max="120" placeholder="Years">
+      <div class="chip-row" id="ageChips">
+        <button type="button" class="chip chip-xs" data-age="2">2</button>
+        <button type="button" class="chip chip-xs" data-age="10">10</button>
+        <button type="button" class="chip chip-xs" data-age="30">30</button>
+        <button type="button" class="chip chip-xs" data-age="50">50</button>
+        <button type="button" class="chip chip-xs" data-age="70">70</button>
+      </div>
+
+      <span class="field-label" id="sexLabel">Sex</span>
+      <div class="seg" id="genderSeg" role="radiogroup" aria-labelledby="sexLabel">
+        <button type="button" class="seg-btn is-on" data-value="U" role="radio" aria-checked="true">Unknown</button>
+        <button type="button" class="seg-btn" data-value="M" role="radio" aria-checked="false">Male</button>
+        <button type="button" class="seg-btn" data-value="F" role="radio" aria-checked="false">Female</button>
+        <button type="button" class="seg-btn" data-value="O" role="radio" aria-checked="false">Other</button>
+      </div>
+
+      <span class="field-label">Blood group</span>
+      <div class="chip-row" id="bloodChips">
+        <button type="button" class="chip chip-xs" data-blood="O+">O+</button>
+        <button type="button" class="chip chip-xs" data-blood="O-">O−</button>
+        <button type="button" class="chip chip-xs" data-blood="A+">A+</button>
+        <button type="button" class="chip chip-xs" data-blood="A-">A−</button>
+        <button type="button" class="chip chip-xs" data-blood="B+">B+</button>
+        <button type="button" class="chip chip-xs" data-blood="B-">B−</button>
+        <button type="button" class="chip chip-xs" data-blood="AB+">AB+</button>
+        <button type="button" class="chip chip-xs" data-blood="AB-">AB−</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Consciousness</h2></div>
+      <div class="levels" id="consciousnessGroup" role="radiogroup" aria-label="Level of consciousness">
+        <button type="button" class="level" data-value="Conscious" role="radio" aria-checked="false">
+          <span class="level-dot level-good" aria-hidden="true"></span>
+          <span class="level-text"><b>Conscious</b><small>Alert and responding</small></span>
+        </button>
+        <button type="button" class="level" data-value="Semi-Conscious" role="radio" aria-checked="false">
+          <span class="level-dot level-caution" aria-hidden="true"></span>
+          <span class="level-text"><b>Semi-conscious</b><small>Drowsy, responds to voice or pain</small></span>
+        </button>
+        <button type="button" class="level" data-value="Unconscious" role="radio" aria-checked="false">
+          <span class="level-dot level-critical" aria-hidden="true"></span>
+          <span class="level-text"><b>Unconscious</b><small>No response</small></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Vitals</h2><span class="tag">Optional</span></div>
+      <p class="card-sub">Leave anything you did not measure blank. Blank is honest; zero is a reading.</p>
+
+      <div class="vital">
+        <label class="field-label" for="systolicBp">Systolic BP <span class="unit">mmHg</span></label>
+        <span class="chip-state" id="sysChip" hidden></span>
+        <input type="number" id="systolicBp" class="input" inputmode="numeric" placeholder="—">
+      </div>
+      <div class="vital">
+        <label class="field-label" for="diastolicBp">Diastolic BP <span class="unit">mmHg</span></label>
+        <span class="chip-state" id="diaChip" hidden></span>
+        <input type="number" id="diastolicBp" class="input" inputmode="numeric" placeholder="—">
+      </div>
+      <div class="vital">
+        <label class="field-label" for="heartRate">Heart rate <span class="unit">bpm</span></label>
+        <span class="chip-state" id="hrChip" hidden></span>
+        <input type="number" id="heartRate" class="input" inputmode="numeric" placeholder="—">
+      </div>
+      <div class="vital">
+        <label class="field-label" for="respRate">Respiratory rate <span class="unit">per min</span></label>
+        <span class="chip-state" id="rrChip" hidden></span>
+        <input type="number" id="respRate" class="input" inputmode="numeric" placeholder="—">
+      </div>
+      <div class="vital">
+        <label class="field-label" for="spo2">SpO<sub>2</sub> <span class="unit">%</span></label>
+        <span class="chip-state" id="spo2Chip" hidden></span>
+        <input type="number" id="spo2" class="input" inputmode="numeric" placeholder="—">
+      </div>
+      <div class="vital">
+        <label class="field-label" for="glucose">Glucose <span class="unit">mg/dL</span></label>
+        <span class="chip-state" id="glcChip" hidden></span>
+        <input type="number" id="glucose" class="input" inputmode="numeric" placeholder="—">
+      </div>
+    </section>
+
+    <section class="card" id="strokeSection" hidden>
+      <div class="card-head"><h2>FAST stroke check</h2><span class="tag tag-brand">Stroke case</span></div>
+      <p class="card-sub">Onset time decides whether thrombolysis is still possible. It is the single most useful thing the ER can know before arrival.</p>
+
+      <span class="field-label" id="fastFaceLabel">Facial droop</span>
+      <div class="seg seg-yn" id="fastFace" role="radiogroup" aria-labelledby="fastFaceLabel">
+        <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
+        <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+      </div>
+
+      <span class="field-label" id="fastArmLabel">Arm weakness</span>
+      <div class="seg seg-yn" id="fastArm" role="radiogroup" aria-labelledby="fastArmLabel">
+        <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
+        <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+      </div>
+
+      <span class="field-label" id="fastSpeechLabel">Speech difficulty</span>
+      <div class="seg seg-yn" id="fastSpeech" role="radiogroup" aria-labelledby="fastSpeechLabel">
+        <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
+        <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+      </div>
+
+      <label class="field-label" for="onsetHours">Hours since symptoms began</label>
+      <input type="number" id="onsetHours" class="input" inputmode="decimal" step="0.5" min="0" placeholder="Hours">
+      <div class="chip-row" id="onsetChips">
+        <button type="button" class="chip chip-xs" data-onset="0.5">30 min</button>
+        <button type="button" class="chip chip-xs" data-onset="1">1 h</button>
+        <button type="button" class="chip chip-xs" data-onset="2">2 h</button>
+        <button type="button" class="chip chip-xs" data-onset="4">4 h</button>
+        <button type="button" class="chip chip-xs" data-onset="6">6 h</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Resources needed</h2><span class="tag">Auto-derived</span></div>
+      <p class="card-sub">Worked out from the vitals and case type. Tap to override.</p>
+      <div class="chip-row" id="needsChips">
+        <button type="button" class="chip chip-xs" data-need="ventilator" id="needVent" aria-pressed="false">Ventilator</button>
+        <button type="button" class="chip chip-xs" data-need="blood" id="needBlood" aria-pressed="false">Blood</button>
+        <button type="button" class="chip chip-xs" data-need="imaging" id="needImaging" aria-pressed="false">CT / imaging</button>
+        <button type="button" class="chip chip-xs" data-need="ot" id="needOt" aria-pressed="false">Theatre</button>
+        <button type="button" class="chip chip-xs" data-need="cathlab" id="needCath" aria-pressed="false">Cath lab</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Photos</h2><span class="tag" id="photoCount">0 / 4</span></div>
+      <p class="card-sub">Injury, scene, ECG strip or medicine box. Compressed on the device before sending.</p>
+      <div class="photo-grid" id="photoGrid">
+        <button type="button" class="photo-add" id="addPhotoBtn">
+          <span aria-hidden="true">+</span>
+          <span class="photo-add-label">Add photo</span>
+        </button>
+      </div>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" multiple hidden aria-label="Choose photos to attach">
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Where you are</h2></div>
+      <div class="locbox" id="locBox">
+        <span class="loc-icon" id="locIcon" aria-hidden="true">◎</span>
+        <span class="loc-text">
+          <b id="locationStatus">Locating device…</b>
+          <small id="locationMeta">—</small>
+        </span>
+        <button type="button" class="btn-ghost btn-inline" id="locRetryBtn" hidden>Retry</button>
+      </div>
+
+      <div id="locFallback" hidden>
+        <p class="hint">Pick a starting point, or type the coordinates. Whatever you choose is labelled for the ER as set by hand, never shown as a GPS fix.</p>
+        <div class="chip-row" id="locFallbackChips"></div>
+        <div class="coord-row">
+          <span class="coord-field">
+            <label class="field-label" for="manualLat">Latitude</label>
+            <input type="text" id="manualLat" class="input" inputmode="decimal" placeholder="12.9716">
+          </span>
+          <span class="coord-field">
+            <label class="field-label" for="manualLng">Longitude</label>
+            <input type="text" id="manualLng" class="input" inputmode="decimal" placeholder="77.5946">
+          </span>
+        </div>
+        <button type="button" class="btn-secondary" id="useManualBtn">Use these coordinates</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Broadcast</h2></div>
+      <p class="card-sub">Every registered emergency department within the radius is alerted at once. The first to accept takes the case.</p>
+
+      <label class="field-label" for="radiusKm">Radius <span class="unit" id="radiusOut">15 km</span></label>
+      <input type="range" id="radiusKm" class="slider" min="5" max="50" step="5" value="15">
+      <div class="chip-row" id="radiusChips">
+        <button type="button" class="chip chip-xs" data-radius="5">5</button>
+        <button type="button" class="chip chip-xs" data-radius="10">10</button>
+        <button type="button" class="chip chip-xs is-on" data-radius="15">15</button>
+        <button type="button" class="chip chip-xs" data-radius="25">25</button>
+        <button type="button" class="chip chip-xs" data-radius="50">50</button>
+      </div>
+
+      <label class="field-label" for="eta">Your ETA <span class="unit">minutes</span></label>
+      <input type="number" id="eta" class="input" inputmode="numeric" min="1" max="180" placeholder="Minutes">
+      <div class="chip-row" id="etaChips">
+        <button type="button" class="chip chip-xs" data-eta="5">5</button>
+        <button type="button" class="chip chip-xs" data-eta="10">10</button>
+        <button type="button" class="chip chip-xs" data-eta="15">15</button>
+        <button type="button" class="chip chip-xs" data-eta="20">20</button>
+        <button type="button" class="chip chip-xs" data-eta="30">30</button>
+      </div>
+
+      <label class="field-label" for="notes">Crew note <span class="unit" id="notesCount">0 / 160</span></label>
+      <textarea id="notes" class="input textarea" maxlength="160" rows="2" placeholder="Anything the ER should know before you arrive"></textarea>
+    </section>
+
+    <details class="card card-details" id="moreCard">
+      <summary>Unit ID and settings</summary>
+      <label class="field-label" for="ambulanceId">Ambulance unit ID</label>
+      <input type="text" id="ambulanceId" class="input" placeholder="KA01AB1234" autocomplete="off">
+      <p class="hint">Stored on this device and reused for every case.</p>
+
+      <span class="field-label" id="themeLabel">Colour theme</span>
+      <div class="seg" id="themeSeg" role="radiogroup" aria-labelledby="themeLabel">
+        <button type="button" class="seg-btn is-on" data-theme="auto" role="radio" aria-checked="true">Auto</button>
+        <button type="button" class="seg-btn" data-theme="light" role="radio" aria-checked="false">Light</button>
+        <button type="button" class="seg-btn" data-theme="dark" role="radio" aria-checked="false">Dark</button>
+      </div>
+    </details>
+
+    <div class="submit-bar">
+      <button type="button" class="btn-primary" id="submitBtn">Broadcast request</button>
+      <p class="submit-hint" id="submitHint">Checking readiness…</p>
+    </div>
+  </main>
+
+  <!-- ═══ CASES ════════════════════════════════════════════════════════ -->
+  <main class="scroll view" id="casesView" hidden>
+    <section class="card">
+      <div class="card-head"><h2>Recent cases</h2></div>
+      <p class="card-sub">Kept on this device only. No patient names are stored.</p>
+      <div class="recent-list" id="caseList">
+        <p class="empty-note">Nothing yet this shift.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═══ Bottom navigation ════════════════════════════════════════════ -->
+  <nav class="tabbar" id="tabbar" aria-label="Main">
+    <button type="button" class="tab is-on" data-view="home" aria-current="page">
+      <span class="tab-glyph" aria-hidden="true">⌂</span><span>Home</span>
+    </button>
+    <button type="button" class="tab" data-view="new">
+      <span class="tab-glyph" aria-hidden="true">＋</span><span>New alert</span>
+    </button>
+    <button type="button" class="tab" data-view="cases">
+      <span class="tab-glyph" aria-hidden="true">≡</span><span>Cases</span>
+    </button>
+    <button type="button" class="tab" data-view="settings">
+      <span class="tab-glyph" aria-hidden="true">⚙</span><span>Settings</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ═══ Overlays ═══════════════════════════════════════════════════════ -->
+
+<div class="overlay" id="successOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="successTitle">
+  <div class="sheet">
+    <h2 id="successTitle">Request broadcast</h2>
+    <p class="sheet-sub" id="broadcastInfo">Sent.</p>
+
+    <div class="status-chip status-pending" id="statusChip">
+      <span id="statusChipText">Waiting for a hospital to accept…</span>
+    </div>
+
+    <div class="accepted-box" id="acceptedBox" hidden>
+      <b class="accepted-name" id="acceptedName">—</b>
+      <span class="accepted-meta" id="acceptedMeta">—</span>
+    </div>
+
+    <p class="sheet-note" id="sheetNote">You can close this and keep working. The case stays on the Home screen.</p>
+    <button type="button" class="btn-primary" id="newRequestBtn">Start new request</button>
+  </div>
+</div>
+
+<div class="overlay" id="errorOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="errorTitle">
+  <div class="sheet">
+    <h2 id="errorTitle">Couldn't send</h2>
+    <p class="sheet-sub" id="errorMessage">Network error.</p>
+    <p class="sheet-note">Nothing was lost. Retry sends the exact same case.</p>
+    <button type="button" class="btn-primary" id="retryBtn">Retry</button>
+    <button type="button" class="btn-ghost" id="backBtn">Back to form</button>
+  </div>
+</div>
+
+<div class="overlay" id="outboxOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="outboxTitle">
+  <div class="sheet">
+    <h2 id="outboxTitle">Queued cases</h2>
+    <p class="sheet-sub" id="outboxInfo">No signal. These send themselves the moment you have a connection.</p>
+    <div class="recent-list" id="outboxList"></div>
+    <button type="button" class="btn-primary" id="tryFlushBtn">Send now</button>
+    <button type="button" class="btn-ghost" id="discardQueuedBtn">Discard queued cases</button>
+  </div>
+</div>
+
+<div class="overlay" id="editOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="editTitle">
+  <div class="sheet sheet-tall">
+    <h2 id="editTitle">Update patient</h2>
+    <p class="sheet-sub">The accepting hospital sees these changes immediately. The case code does not change.</p>
+
+    <label class="field-label" for="editAge">Age</label>
+    <input type="number" id="editAge" class="input" inputmode="numeric" min="0" max="120">
+
+    <span class="field-label" id="editSexLabel">Sex</span>
+    <div class="seg" id="editGender" role="radiogroup" aria-labelledby="editSexLabel">
+      <button type="button" class="seg-btn is-on" data-value="U" role="radio" aria-checked="true">Unknown</button>
+      <button type="button" class="seg-btn" data-value="M" role="radio" aria-checked="false">Male</button>
+      <button type="button" class="seg-btn" data-value="F" role="radio" aria-checked="false">Female</button>
+      <button type="button" class="seg-btn" data-value="O" role="radio" aria-checked="false">Other</button>
+    </div>
+
+    <span class="field-label">Blood group</span>
+    <div class="chip-row" id="editBloodRow">
+      <button type="button" class="chip chip-xs" data-blood="O+">O+</button>
+      <button type="button" class="chip chip-xs" data-blood="O-">O−</button>
+      <button type="button" class="chip chip-xs" data-blood="A+">A+</button>
+      <button type="button" class="chip chip-xs" data-blood="B+">B+</button>
+      <button type="button" class="chip chip-xs" data-blood="AB+">AB+</button>
+    </div>
+
+    <span class="field-label" id="editConsciousnessLabel">Consciousness</span>
+    <div class="levels levels-compact" id="editConsciousness" role="radiogroup" aria-labelledby="editConsciousnessLabel">
+      <button type="button" class="level" data-value="Conscious" role="radio" aria-checked="false"><span class="level-text"><b>Conscious</b></span></button>
+      <button type="button" class="level" data-value="Semi-Conscious" role="radio" aria-checked="false"><span class="level-text"><b>Semi-conscious</b></span></button>
+      <button type="button" class="level" data-value="Unconscious" role="radio" aria-checked="false"><span class="level-text"><b>Unconscious</b></span></button>
+    </div>
+
+    <div class="edit-vitals">
+      <span class="coord-field"><label class="field-label" for="editSys">Systolic</label><input type="number" id="editSys" class="input" inputmode="numeric"></span>
+      <span class="coord-field"><label class="field-label" for="editDia">Diastolic</label><input type="number" id="editDia" class="input" inputmode="numeric"></span>
+      <span class="coord-field"><label class="field-label" for="editHr">Heart rate</label><input type="number" id="editHr" class="input" inputmode="numeric"></span>
+      <span class="coord-field"><label class="field-label" for="editRr">Resp rate</label><input type="number" id="editRr" class="input" inputmode="numeric"></span>
+      <span class="coord-field"><label class="field-label" for="editSpo2">SpO<sub>2</sub></label><input type="number" id="editSpo2" class="input" inputmode="numeric"></span>
+      <span class="coord-field"><label class="field-label" for="editGlc">Glucose</label><input type="number" id="editGlc" class="input" inputmode="numeric"></span>
+    </div>
+
+    <label class="field-label" for="editNotes">Crew note</label>
+    <textarea id="editNotes" class="input textarea" maxlength="500" rows="2"></textarea>
+
+    <p class="sheet-note" id="editStatus" role="status"></p>
+    <button type="button" class="btn-primary" id="editSaveBtn">Save changes</button>
+    <button type="button" class="btn-ghost" id="editCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden role="status"></div>
+
+<script src="config.js"></script>
+<script src="vendor/socket.io.min.js"></script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

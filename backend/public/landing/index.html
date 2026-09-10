@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#F4F4F4">
+<meta name="color-scheme" content="light dark">
+<title>GoldenHour · start here</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2325CED1'/%3E%3Cpath d='M22 50h13l7-14 11 24 7-10h18' fill='none' stroke='%23073B3C' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --cyan:#25CED1; --coral:#FF8A5B; --page:#F4F4F4; --surface:#FFFFFF;
+    --brand-ink:#0B7679; --accent-deep:#E86B39;
+    --ink:#1A2130; --ink-2:#414B5E; --muted:#6B7688; --line:rgba(24,36,56,.11);
+    --shadow:0 16px 34px -24px rgba(20,32,52,.45), 0 2px 6px -4px rgba(20,32,52,.12);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --page:#101418; --surface:#191F26; --ink:#EDF1F6; --ink-2:#C6CFDB;
+           --muted:#939FB0; --line:rgba(255,255,255,.1); --brand-ink:#9CF0F1; --accent-deep:#FF9D74; }
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100vh; font-family:var(--font); color:var(--ink);
+    background:
+      radial-gradient(70% 50% at 0% 0%, rgba(37,206,209,.18), transparent 60%),
+      radial-gradient(60% 45% at 100% 4%, rgba(255,138,91,.15), transparent 58%),
+      var(--page);
+    padding:clamp(20px,5vw,56px);
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:900px; margin:0 auto; }
+  header{ display:flex; align-items:center; gap:14px; margin-bottom:8px; }
+  .mark{ width:50px; height:50px; border-radius:16px; display:grid; place-items:center;
+         background:linear-gradient(145deg,#57DDDF,#12B4B7); color:#04383A; font-size:24px; }
+  h1{ margin:0; font-size:27px; font-weight:780; letter-spacing:-.03em; }
+  h1 em{ font-style:normal; color:var(--brand-ink); }
+  .sub{ color:var(--muted); font-size:15px; margin:0 0 30px 64px; }
+  @media (max-width:560px){ .sub{ margin-left:0; } }
+
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; }
+  a.tile{
+    display:block; text-decoration:none; color:inherit;
+    background:var(--surface); border:1px solid var(--line); border-radius:20px;
+    padding:22px; box-shadow:var(--shadow);
+    transition:transform .18s cubic-bezier(.34,1.4,.5,1), box-shadow .18s ease;
+  }
+  a.tile:hover{ transform:translateY(-3px); box-shadow:0 22px 44px -26px rgba(20,32,52,.5); }
+  .tile .eyebrow{ font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--brand-ink); }
+  .tile.coral .eyebrow{ color:var(--accent-deep); }
+  .tile h2{ margin:7px 0 6px; font-size:19px; font-weight:740; letter-spacing:-.02em; }
+  .tile p{ margin:0; font-size:13.5px; color:var(--muted); line-height:1.5; }
+  .tile code{ display:block; margin-top:12px; font-size:12.5px; color:var(--brand-ink); word-break:break-all; }
+
+  section.panel{
+    margin-top:26px; background:var(--surface); border:1px solid var(--line);
+    border-radius:20px; padding:22px; box-shadow:var(--shadow);
+  }
+  section.panel h3{ margin:0 0 12px; font-size:14px; font-weight:780; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-2); }
+  ol{ margin:0; padding-left:20px; color:var(--ink-2); font-size:14px; line-height:1.75; }
+  ol code, p code{ background:var(--page); padding:2px 7px; border-radius:6px; font-size:13px; }
+  table{ width:100%; border-collapse:collapse; font-size:13.5px; margin-top:4px; }
+  th,td{ text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th{ font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:750; }
+  td b{ font-weight:700; }
+  .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:8px; }
+  footer{ margin-top:26px; font-size:12.5px; color:var(--muted); text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="mark">🚑</span>
+    <h1>Golden<em>Hour</em></h1>
+  </header>
+  <p class="sub">Master server is up. Open the right page on each machine.</p>
+
+  <div class="grid">
+    <a class="tile" href="/hospital" id="hospitalTile">
+      <span class="eyebrow">On both laptops</span>
+      <h2>Hospital ER desk</h2>
+      <p>The incoming-case board. Each laptop recognises itself by its IP address — no login, no setup.</p>
+      <code id="hospitalUrl">/hospital</code>
+    </a>
+
+    <a class="tile coral" href="/ambulance" id="ambulanceTile">
+      <span class="eyebrow">On the ambulance device</span>
+      <h2>Ambulance app</h2>
+      <p>The same code that ships inside the Android APK. Fill the form, press Broadcast Request.</p>
+      <code id="ambulanceUrl">/ambulance</code>
+    </a>
+  </div>
+
+  <section class="panel">
+    <h3>The two hardcoded laptops</h3>
+    <table id="laptops"><tbody><tr><td>Loading…</td></tr></tbody></table>
+    <p style="margin-top:14px;font-size:13px;color:var(--muted)">
+      Wrong IP? Edit <code>config/hospitals.config.js</code> and restart, or open
+      <code>/hospital?hospital=1</code> / <code>?hospital=2</code> to set a laptop by hand.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h3>Demo script</h3>
+    <ol>
+      <li>Open <code>/hospital</code> on <b>both</b> laptops — each shows its own hospital name.</li>
+      <li>On the ambulance device, fill a case and press <b>Broadcast Request</b>.</li>
+      <li>The case appears on <b>both</b> boards at the same moment, with a chime.</li>
+      <li>Press <b>Accept patient</b> on one laptop.</li>
+      <li>It vanishes from the other laptop, labelled with who took it, and the ambulance screen turns to “✓ Accepted by …”.</li>
+    </ol>
+  </section>
+
+  <footer>Health check: <a id="healthLink" href="/health" style="color:var(--brand-ink)">/health</a></footer>
+</div>
+
+<script>
+  var base = window.location.origin;
+  document.getElementById('hospitalUrl').textContent = base + '/hospital';
+  document.getElementById('ambulanceUrl').textContent = base + '/ambulance';
+
+  fetch('/api/v1/desk/laptops')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      var rows = '<thead><tr><th>#</th><th>Hospital</th><th>Laptop IP</th><th>Open</th></tr></thead><tbody>';
+      data.laptops.forEach(function (h) {
+        rows += '<tr>' +
+          '<td><span class="dot" style="background:' + h.accent + '"></span><b>' + h.hospital_id + '</b></td>' +
+          '<td>' + h.name + '</td>' +
+          '<td><code>' + h.ip + '</code></td>' +
+          '<td><a style="color:var(--brand-ink)" href="/hospital?hospital=' + h.hospital_id + '">force this</a></td>' +
+          '</tr>';
+      });
+      rows += '</tbody>';
+      document.getElementById('laptops').innerHTML = rows;
+    })
+    .catch(function () {
+      document.getElementById('laptops').innerHTML = '<tbody><tr><td>Could not reach the API.</td></tr></tbody>';
+    });
+</script>
+</body>
+</html>
