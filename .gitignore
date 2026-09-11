@@ -1,0 +1,12 @@
+node_modules/
+.env
+.shots/
+*.log
+.DS_Store
+
+# Android build output
+app/android/build/
+app/android/app/build/
+app/android/.gradle/
+app/android/local.properties
+app/android/app/src/main/assets/public/

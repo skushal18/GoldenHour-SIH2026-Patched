@@ -1,0 +1,396 @@
+/* ============================================================================
+   GoldenHour v5 — ER desk board.
+   ========================================================================== */
+@import "../../../shared/design/tokens.css";
+@import "../../../shared/design/primitives.css";
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: var(--w-regular) var(--t-body)/var(--lh-body) var(--font-sans);
+  background: var(--page);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+/* The wash the acrylic refracts. Fixed and unanimated: glass over a flat
+   colour reads as a grey panel, glass over a gentle gradient reads as glass. */
+.ambient{
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60vw 70vh at 4% -10%,  rgba(90,155,213,.18), transparent 60%),
+    radial-gradient(55vw 60vh at 98% 4%,   rgba(183,215,240,.30), transparent 58%),
+    radial-gradient(70vw 60vh at 50% 106%, rgba(90,155,213,.12), transparent 62%);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .ambient{
+    background:
+      radial-gradient(60vw 70vh at 4% -10%, rgba(90,155,213,.14), transparent 60%),
+      radial-gradient(55vw 60vh at 98% 4%,  rgba(31,63,102,.40),  transparent 58%),
+      radial-gradient(70vw 60vh at 50% 106%, rgba(90,155,213,.09), transparent 62%);
+  }
+}
+
+/* ── deskbar ───────────────────────────────────────────────────── */
+.deskbar {
+  position: sticky; top: 0; z-index: 30;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: var(--s-4);
+  border-width: 0 0 1px 0;
+  border-radius: 0;
+  padding: var(--s-3) var(--s-5);
+}
+.deskbar-left { display:flex; align-items:center; gap: var(--s-3); }
+.deskbar .mark { width: 36px; height: 36px; border-radius: var(--r-md); background: linear-gradient(150deg, var(--brand-fill-2) 0%, var(--brand-fill) 100%); color: var(--on-brand); display:flex; align-items:center; justify-content:center; }
+.deskbar .mark svg { width: 22px; height: 22px; }
+.identity-text h1 { margin:0; font-size: var(--t-title); font-weight: var(--w-bold); letter-spacing: -.02em; }
+.identity-text p { margin:0; font-size: var(--t-small); color: var(--muted); }
+
+.deskbar-strip {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: 6px var(--s-3);
+}
+.capacity { display: flex; align-items: center; gap: var(--s-2); }
+.cap-label { font-size: var(--t-micro); text-transform: uppercase; letter-spacing: .06em; font-weight: var(--w-bold); color: var(--ink-2); }
+.step {
+  width: 28px; height: 28px; border-radius: var(--r-xs); background: var(--surface);
+  border: 1px solid var(--line-strong); color: var(--ink-2); font-weight: var(--w-bold);
+}
+.step:hover { background: var(--brand-wash); }
+.capacity b { font-size: var(--t-title); font-weight: var(--w-bold); font-family: var(--font-num); font-variant-numeric: tabular-nums; min-width: 28px; text-align: center; }
+
+.toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 var(--s-3);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  font-size: var(--t-small); font-weight: var(--w-semi);
+}
+.t-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.toggle.is-on { background: var(--good-wash); border-color: var(--good-line); color: var(--good-ink); }
+.toggle.is-on .t-dot { background: var(--good-fill); }
+.toggle.is-warn { background: var(--caution-wash); border-color: var(--caution-line); color: var(--caution-ink); }
+.toggle.is-warn .t-dot { background: var(--caution-fill); }
+.updated { margin-left: auto; font-size: var(--t-small); color: var(--muted); }
+.toggle.is-stale { color: var(--caution-ink); }
+
+.deskbar-right { display:flex; gap: var(--s-2); }
+.icon-btn, .icon-link {
+  width: 40px; height: 40px; border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  display:flex; align-items:center; justify-content:center;
+  font-size: 18px; color: var(--ink-2);
+}
+.icon-btn:hover, .icon-link:hover { background: var(--surface); }
+
+/* ── diversion band ──────────────────────────────────────────── */
+.diversion-band {
+  background: var(--caution-wash);
+  color: var(--caution-ink);
+  padding: var(--s-3) var(--s-5);
+  border-bottom: 1px solid var(--caution-line);
+  font-size: var(--t-small);
+  font-weight: var(--w-semi);
+  text-align: center;
+}
+
+/* ── board grid ─────────────────────────────────────────────── */
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr) 340px;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  max-width: var(--board-max);
+  margin: 0 auto;
+}
+.column {
+  display: flex; flex-direction: column; gap: var(--s-3);
+  min-width: 0;
+}
+.column-side { grid-column: 3 / 4; }
+.column-head { display:flex; align-items:baseline; gap: var(--s-2); padding: 0 var(--s-2); flex-wrap: wrap; }
+.eyebrow { font-size: var(--t-micro); font-weight: var(--w-bold); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.count { font-size: var(--t-title); font-weight: var(--w-bold); font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--ink); }
+.column-sub { font-size: var(--t-small); color: var(--muted); padding: 0 var(--s-2); margin-bottom: var(--s-2); }
+
+.case-list { display:flex; flex-direction: column; gap: var(--s-3); }
+
+/* ── case card ───────────────────────────────────────────────── */
+.case {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--good-line);  /* default GREEN spine */
+  border-radius: var(--r-lg);
+  box-shadow: var(--e-1);
+  padding: var(--s-4);
+  display: flex; flex-direction: column; gap: var(--s-3);
+  position: relative;
+  overflow: hidden;
+  /* A card that appears because an ambulance is on its way earns an
+     entrance. It is 280ms and it does not bounce. */
+  animation: case-in var(--d-slow) var(--ease-out);
+  transition: box-shadow var(--d-base) var(--ease), border-color var(--d-base) var(--ease);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)){
+  .case{
+    background: var(--glass);
+    -webkit-backdrop-filter: var(--blur);
+    backdrop-filter: var(--blur);
+    box-shadow: var(--e-1), inset 0 1px 0 var(--glass-edge);
+  }
+}
+.case:hover{ box-shadow: var(--e-2); }
+@keyframes case-in{ from{ opacity:0; transform: translateY(-8px); } to{ opacity:1; transform:none; } }
+.case.priority-RED    { border-left-color: var(--critical-line); }
+.case.priority-AMBER  { border-left-color: var(--caution-line); }
+.case.priority-GREEN  { border-left-color: var(--good-line); }
+
+.case-head { display:flex; justify-content: space-between; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.case-title { display:flex; flex-direction: column; }
+.case-title h3 { margin:0; font-size: var(--t-title); font-weight: var(--w-bold); letter-spacing: -.02em; }
+.case-title span.sub { font-size: var(--t-small); color: var(--muted); }
+
+.badge {
+  display:inline-flex; align-items:center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--r-sm);
+  font-size: var(--t-micro); font-weight: var(--w-bold); text-transform: uppercase; letter-spacing: .06em;
+}
+.badge-RED { background: var(--critical-fill); color: var(--on-critical); }
+.badge-AMBER { background: var(--caution-fill); color: var(--on-caution); }
+.badge-GREEN { background: var(--good-fill); color: var(--on-brand); }
+
+.facts-row { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.fact {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-2); border: 1px solid var(--divider);
+  border-radius: var(--r-pill);
+  padding: 4px 12px;
+  font-size: var(--t-small);
+  color: var(--ink-2);
+  font-weight: var(--w-medium);
+}
+.fact-k { font-size: var(--t-micro); text-transform: uppercase; letter-spacing:.06em; color: var(--muted); font-weight: var(--w-bold); }
+.fact-brand .fact-k, .fact-warn .fact-k { color: inherit; opacity: .8; }
+
+/* Analytics panel */
+.stat-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: var(--s-3); }
+.stat-tile { background: var(--surface-2); border:1px solid var(--divider); border-radius: var(--r-md); padding: var(--s-3); display:flex; flex-direction:column; gap:4px; }
+.stat-tile b { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: var(--t-display); font-weight: var(--w-bold); color: var(--ink); line-height: var(--lh-tight); }
+.overlay { position: fixed; inset: 0; z-index: 60; display:flex; align-items:center; justify-content:center; background: rgba(15,20,26,.62); padding: var(--s-4); }
+.sheet { width:100%; max-width: 640px; display:flex; flex-direction:column; gap: var(--s-4); background: var(--surface); border:1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--e-2); padding: var(--s-6); max-height: 88vh; overflow-y:auto; }
+.sheet h2 { margin:0; font-size: var(--t-title); font-weight: var(--w-bold); letter-spacing:-.02em; }
+.sheet-sub { margin:0; font-size: var(--t-small); color: var(--ink-2); }
+.sheet-note { margin:0; font-size: var(--t-small); color: var(--muted); }
+
+.fact-warn { background: var(--caution-wash); color: var(--caution-ink); border-color: var(--caution-line); font-weight: var(--w-bold); }
+.fact-brand { background: var(--brand-wash); color: var(--brand-ink); border-color: var(--brand-line); }
+
+.needs-row { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: -2px; }
+.need-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: var(--r-pill);
+  font-size: var(--t-micro); font-weight: var(--w-bold); text-transform: uppercase; letter-spacing: .06em;
+  background: var(--surface-2); border: 1px solid var(--divider); color: var(--ink-2);
+}
+.need-chip.met { background: var(--good-wash); border-color: var(--good-line); color: var(--good-ink); }
+.need-chip.unmet { background: var(--critical-wash); border-color: var(--critical-line); color: var(--critical-ink); }
+/* Not reported. Deliberately neutral and dashed: it must not read as either
+   a refusal or an availability. */
+.need-chip.unknown { background: var(--surface-2); border-color: var(--line-strong); border-style: dashed; color: var(--ink-2); }
+
+.vitalbox-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-2); }
+.vitalbox { background: var(--surface-2); border-radius: var(--r-sm); padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; }
+.vitalbox b { white-space: nowrap; font-family: var(--font-num); font-variant-numeric: tabular-nums; font-size: var(--t-display); font-weight: var(--w-bold); letter-spacing: -.02em; color: var(--ink); }
+.vitalbox span { font-size: var(--t-micro); text-transform: uppercase; letter-spacing: .06em; font-weight: var(--w-bold); color: var(--muted); }
+.vitalbox.state-good     { background: var(--good-wash); } .vitalbox.state-good b { color: var(--good-ink); }
+.vitalbox.state-caution  { background: var(--caution-wash); } .vitalbox.state-caution b { color: var(--caution-ink); }
+.vitalbox.state-critical { background: var(--critical-wash); } .vitalbox.state-critical b { color: var(--critical-ink); }
+
+.flag-row { display:flex; flex-wrap: wrap; gap: var(--s-2); }
+.flag { background: var(--critical-wash); color: var(--critical-ink); border: 1px solid var(--critical-line); padding: 4px 10px; border-radius: var(--r-xs); font-size: var(--t-micro); font-weight: var(--w-bold); text-transform: uppercase; letter-spacing: .06em; }
+
+.note-block { background: var(--surface-2); border-radius: var(--r-sm); padding: var(--s-3); display:flex; flex-direction: column; gap: 4px; }
+.note-block > .eyebrow { color: var(--muted); }
+.note-block > p { margin:0; font-size: var(--t-body); color: var(--ink); }
+
+.case-actions { display:flex; flex-direction: column; gap: var(--s-2); }
+.btn-accept { width:100%; height: var(--tap-lg); background: linear-gradient(180deg, var(--accent-fill-2) 0%, var(--accent-fill) 50%, var(--accent-fill-3) 100%); color: var(--on-accent); border-radius: var(--r-md); font-weight: var(--w-bold); border:0; box-shadow: var(--e-2); }
+.btn-accept-underwarning { border: 2px solid var(--caution-line); }
+.btn-accept-underwarning-text { font-size: var(--t-small); color: var(--caution-ink); font-weight: var(--w-medium); }
+
+.btn-decline { background: var(--surface-2); border:1px solid var(--line-strong); color: var(--ink-2); border-radius: var(--r-md); height: var(--tap); font-weight: var(--w-semi); }
+
+.map-panel {
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--divider);
+  min-height: 180px;
+  padding: var(--s-3);
+  display:flex; flex-direction: column; gap: var(--s-2);
+}
+.map-head { display:flex; justify-content: space-between; align-items: center; }
+.map-eta { white-space: nowrap;  font-size: var(--t-display); font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: var(--w-bold); letter-spacing: -.02em; color: var(--ink); }
+.map-eta.label { font-size: var(--t-micro); text-transform: uppercase; letter-spacing: .06em; font-weight: var(--w-bold); color: var(--muted); }
+.map-source { font-size: var(--t-micro); font-weight: var(--w-bold); text-transform: uppercase; letter-spacing: .06em; padding: 4px 10px; border-radius: var(--r-pill); }
+.map-source.source-live    { background: var(--good-wash); color: var(--good-ink); border:1px solid var(--good-line); }
+.map-source.source-stalled { background: var(--caution-wash); color: var(--caution-ink); border:1px solid var(--caution-line); }
+.map-source.source-crew    { background: var(--surface-2); color: var(--ink-2); border:1px solid var(--line-strong); }
+.map-placeholder { flex:1; min-height: 110px; background: var(--surface); border-radius: var(--r-sm); border:1px dashed var(--line-strong); display:flex; align-items:center; justify-content:center; color: var(--muted); font-size: var(--t-small); }
+.map-readout { font-size: var(--t-small); color: var(--muted); }
+
+.outcome-ribbon { padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); font-size: var(--t-small); font-weight: var(--w-semi); border: 1px solid; }
+.outcome-accepted { background: var(--good-wash); color: var(--good-ink); border-color: var(--good-line); }
+.outcome-won { background: var(--good-wash); color: var(--good-ink); border-color: var(--good-line); }
+.outcome-lost { background: var(--surface-2); color: var(--ink-2); border-color: var(--line); }
+.outcome-gone { background: var(--caution-wash); color: var(--caution-ink); border-color: var(--caution-line); }
+.outcome-arrived { background: var(--good-wash); color: var(--good-ink); border-color: var(--good-line); }
+
+/* The card-level arrived state. Deliberately a spine and a whisper of tint
+   rather than a full wash: this card is still a clinical record somebody
+   reads, and tinting its background green took the case title down to a pale
+   green on pale green. The priority spine is replaced because the case is no
+   longer inbound — it is here. */
+.case.case-arrived{
+  border-left-color: var(--good-line);
+  box-shadow: var(--e-1), inset 3px 0 0 var(--good-line);
+  opacity: .96;
+}
+.case.case-arrived .case-title h3,
+.case.case-arrived .case-title span.sub{ color: var(--ink); }
+
+.shots-row { display:flex; gap: var(--s-2); flex-wrap: wrap; }
+.shots-row button { width: 96px; height: 96px; padding:0; border-radius: var(--r-md); overflow:hidden; cursor: zoom-in; border: 1px solid var(--line); background: var(--surface-2); transition: transform var(--d-fast) var(--ease), border-color var(--d-base) var(--ease); }
+.shots-row button:hover { border-color: var(--brand-line); transform: scale(1.02); }
+.shots-row button:active { transform: scale(.98); }
+.shots-row img { width:100%; height:100%; object-fit: cover; display: block; }
+
+.countdown { font-size: var(--t-body); font-family: var(--font-num); font-variant-numeric: tabular-nums; padding: 4px 10px; border-radius: var(--r-pill); background: var(--surface-2); color: var(--ink-2); border:1px solid var(--line); }
+.countdown.is-urgent { background: var(--critical-wash); color: var(--critical-ink); border-color: var(--critical-line); animation: pulse 1s ease-in-out infinite alternate; }
+
+/* ── sidebar ─────────────────────────────────────────────────── */
+.net-list { display:flex; flex-direction: column; gap: var(--s-2); }
+.net-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-3); display:flex; flex-direction: column; gap: 4px; font-size: var(--t-small); }
+.net-item .hospital-name { font-size: var(--t-body); font-weight: var(--w-semi); color: var(--ink); }
+.net-item .score { font-family: var(--font-num); font-size: var(--t-title); font-weight: var(--w-bold); color: var(--brand-ink); font-variant-numeric: tabular-nums; }
+.net-item .net-meta { color: var(--muted); }
+
+/* ── lightbox / toast / handover ─────────────────────────── */
+.lightbox { position: fixed; inset: 0; background: rgba(11,22,34,0.88); display:flex; align-items: center; justify-content: center; z-index: 50; }
+.lightbox img { max-width: 92vw; max-height: 92vh; border-radius: var(--r-md); }
+.lightbox-close { position: absolute; top: var(--s-4); right: var(--s-4); }
+
+.handover { max-width: 720px; margin: 32px auto; padding: 32px; background: #FFFFFF; color: #1F3F66; font-family: var(--font-sans); }
+.handover h1 { margin: 0 0 12px 0; }
+
+@media (max-width: 1180px) {
+  .board { grid-template-columns: 1fr 1fr; }
+  .column-side { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .board { grid-template-columns: 1fr; }
+  .deskbar { grid-template-columns: 1fr; gap: var(--s-3); }
+}
+
+@media print {
+  /* A handover sheet goes into a patient's notes. It has to be one clean page
+     of black on white — so everything the screen design adds is stripped:
+     the ambient wash, every acrylic surface, every blur, every shadow, and
+     the whole board. A backdrop-filter that survives into a print job comes
+     out as a grey box over the text. */
+  html, body { background: #FFFFFF !important; }
+  .ambient, .deskbar, .diversion-band, .board, .toast, .lightbox, .overlay { display: none !important; }
+
+  *, *::before, *::after {
+    background: transparent !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    color: #000000 !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .handover {
+    display: block !important;
+    max-width: none; margin: 0; padding: 0;
+    background: #FFFFFF !important;
+  }
+  .handover h1 { font-size: 20pt; }
+  .handover ul { margin: 4pt 0 0 16pt; }
+  /* Let a long vitals list break across pages, but never mid-row. */
+  .handover div, .handover li, .handover p { break-inside: avoid; }
+}
+
+
+/* ── Added with the acrylic redesign ──────────────────────────────────── */
+
+/* A second action on an active card — Print handover sits beside Reached
+   hospital and must not compete with it. */
+.btn-secondary-desk{
+  min-height: var(--tap);
+  padding: 0 var(--s-5);
+  border-radius: var(--r-md);
+  background: var(--brand-wash);
+  color: var(--brand-ink);
+  border: 1px solid var(--brand-line);
+  font-size: var(--t-body);
+  font-weight: var(--w-semi);
+  transition: background-color var(--d-base) var(--ease), transform var(--d-fast) var(--ease);
+}
+.btn-secondary-desk:hover{ background: var(--surface); }
+.btn-secondary-desk:active{ transform: scale(.98); }
+
+/* The same dismissal affordance the ambulance app uses, in the same place. */
+.sheet-x{
+  position: absolute; top: var(--s-4); right: var(--s-4);
+  width: var(--tap-sm); height: var(--tap-sm);
+  display:grid; place-items:center;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  z-index: 2;
+  transition: background-color var(--d-base) var(--ease), color var(--d-base) var(--ease), transform var(--d-fast) var(--ease);
+}
+.sheet-x svg{ width: 18px; height: 18px; }
+.sheet-x:hover{ background: var(--critical-wash); color: var(--critical-ink); border-color: var(--critical-line); }
+.sheet-x:active{ transform: scale(.94); }
+.lightbox-x{
+  top: var(--s-5); right: var(--s-5);
+  background: rgba(255,255,255,.92);
+  border-color: rgba(255,255,255,.6);
+  color: #1F3F66;
+}
+.sheet h2{ padding-right: 56px; }
+
+/* The analytics panel is a sheet like any other. */
+.overlay{ animation: scrim-in var(--d-base) var(--ease); }
+.sheet{ animation: sheet-up var(--d-slow) var(--ease-out); }
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)){
+  .overlay{ background: rgba(11,22,34,.38); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .sheet{
+    background: var(--glass);
+    -webkit-backdrop-filter: var(--blur-lg);
+    backdrop-filter: var(--blur-lg);
+    box-shadow: var(--e-2), inset 0 1px 0 var(--glass-edge);
+  }
+}
+@keyframes scrim-in{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes sheet-up{ from{ opacity:0; transform: translateY(18px); } to{ opacity:1; transform:none; } }
+
+/* The network sidebar and capacity strip pick up the same glass. */
+.net-item{ transition: border-color var(--d-base) var(--ease), background-color var(--d-base) var(--ease); }
+.net-item:hover{ border-color: var(--brand-line); }
+.step, .toggle{ transition: background-color var(--d-base) var(--ease), border-color var(--d-base) var(--ease), transform var(--d-fast) var(--ease); }
+.step:active, .toggle:active{ transform: scale(.95); }
+
+@media (prefers-reduced-motion: reduce){
+  .case, .overlay, .sheet{ animation: none !important; }
+}

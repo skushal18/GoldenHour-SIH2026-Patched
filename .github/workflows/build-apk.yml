@@ -1,0 +1,142 @@
+name: Build GoldenHour APK
+
+# Builds the installable Android APK in GitHub's cloud.
+# No Android Studio, no local SDK, no Java install, nothing global.
+#
+#   Actions tab → "Build GoldenHour APK" → Run workflow
+#   → fill in the backend address → wait ~4 minutes
+#   → download the "goldenhour-apk" artifact, unzip, copy to a phone, install
+#
+# Deliberately independent of the test workflow: on demo day you want an APK
+# even if a test is red.
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_base:
+        description: 'Backend the APK should talk to, e.g. https://goldenhour.up.railway.app (blank = app/www/config.js as committed, which means demo mode)'
+        required: false
+        default: ''
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options: [debug, release]
+  push:
+    branches: [main, master]
+    paths:
+      - 'app/**'
+      - 'shared/**'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  apk:
+    name: Assemble APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # `npm ci` installs @capacitor/cli into app/node_modules/.bin, so the
+      # `cap` used below is this project's pinned version. Nothing here depends
+      # on a globally installed Capacitor — that was the cause of the old
+      # "npm error could not determine executable to run".
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Prove the Capacitor CLI came from the lockfile
+        working-directory: app
+        run: |
+          test -x node_modules/.bin/cap || { echo "::error::@capacitor/cli is not in app/node_modules — check app/package.json"; exit 1; }
+          npx cap --version
+
+      # Build the web app BEFORE the address is baked in: the build writes
+      # app/www/index.html, app.js and style.css, and must not clobber
+      # config.js afterwards.
+      - name: Build the web app
+        working-directory: app
+        run: npm run build
+
+      # Saves you from shipping an APK that points at nothing. Skipped when the
+      # box is left blank, in which case whatever is committed in config.js
+      # wins — and a blank SERVER_BASE means the app runs in demo mode rather
+      # than guessing its own https://localhost WebView origin.
+      - name: Bake the backend address into the app
+        if: inputs.server_base != ''
+        env:
+          SERVER_BASE: ${{ inputs.server_base }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const file = 'app/www/config.js';
+            const base = process.env.SERVER_BASE.replace(/\/+\$/, '');
+            if (!/^https?:\/\//.test(base)) { console.error('server_base must start with http:// or https://'); process.exit(1); }
+            const src = fs.readFileSync(file, 'utf8');
+            const out = src.replace(/SERVER_BASE:\s*\"[^\"]*\"/, 'SERVER_BASE: \"' + base + '\"');
+            if (out === src) { console.error('Could not find SERVER_BASE in ' + file); process.exit(1); }
+            fs.writeFileSync(file, out);
+            console.log('SERVER_BASE = ' + base);
+          "
+
+      - name: Show the server this APK will talk to
+        run: grep -n 'SERVER_BASE:' app/www/config.js
+
+      # The android/ project is committed, so this is a copy-and-sync rather
+      # than a scaffold. `cap add android` is here only as a safety net for a
+      # checkout where it is missing.
+      - name: Copy the web app into the Android project
+        working-directory: app
+        run: |
+          if [ ! -d android ]; then
+            echo "android/ is missing from the checkout — adding the platform"
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Gradle build
+        working-directory: app/android
+        run: |
+          chmod +x ./gradlew
+          if [ "${{ inputs.build_type }}" = "release" ]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace
+          else
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          fi
+
+      # A release build with no signing keys produces app-release-unsigned.apk,
+      # which a phone refuses to install. Debug is what you want for a demo;
+      # this just makes the failure legible if someone picks release.
+      - name: Locate the APK
+        id: find
+        run: |
+          APK=$(find app/android/app/build/outputs/apk -name '*.apk' | head -1)
+          if [ -z "$APK" ]; then echo "::error::No APK was produced"; exit 1; fi
+          case "$APK" in
+            *unsigned*) echo "::warning::$APK is unsigned and will not install on a phone. Use the debug build type." ;;
+          esac
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          ls -lh "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: goldenhour-apk
+          path: ${{ steps.find.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30

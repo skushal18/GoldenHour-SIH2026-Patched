@@ -1,0 +1,131 @@
+name: Tests
+
+# Runs on every push. Deliberately separate from the APK build: a red test
+# should never stop you producing an APK five minutes before a demo.
+
+on:
+  push:
+    branches: [main, master, testing, rebuild]
+  pull_request:
+  workflow_dispatch:
+
+# One Node version, pinned, used everywhere — including locally. Changing the
+# runtime version is not a debugging technique, and the churn it caused last
+# time is why this comment exists.
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  design:
+    name: Design system · contrast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      # No dependencies: the checker is plain Node over shared/design/tokens.css.
+      - run: node shared/design/contrast.check.js
+
+  app:
+    name: Ambulance app · unit + config + location + functional
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - working-directory: app
+        run: npm ci
+      # `pretest` builds first, so the suites can never run against stale
+      # output in app/www.
+      - working-directory: app
+        run: npm test
+
+  backend:
+    name: Backend · broadcast, desk auth, tracking, capacity, audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - working-directory: backend
+        run: npm ci
+      - working-directory: backend
+        run: npm test
+
+  built-output:
+    name: Committed build output matches source
+    runs-on: ubuntu-latest
+    # app/www and backend/public/hospital are committed artefacts: the APK
+    # workflow rewrites a file inside app/www, and `npm start` on a clean clone
+    # has to serve both front-ends with no build step. Committed output goes
+    # stale silently, so this job proves it did not.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm --prefix app ci
+      - run: npm --prefix backend ci
+      - run: npm --prefix app run build
+      - run: npm --prefix backend run build:desk
+      - name: Output must be committed
+        run: |
+          if ! git diff --exit-code -- app/www backend/public/hospital; then
+            echo "::error::The committed build output is out of date."
+            echo "Run: npm --prefix app run build && npm --prefix backend run build:desk"
+            exit 1
+          fi
+
+  production-config:
+    name: Production refuses an unsafe configuration
+    runs-on: ubuntu-latest
+    # The security gate is only worth having if it is exercised. This proves
+    # that a production boot with demo settings fails, and that a properly
+    # configured one gets past the gate.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm --prefix backend ci
+      - name: An unsafe production config must not start
+        working-directory: backend
+        run: |
+          set +e
+          NODE_ENV=production node src/server.js > out.log 2>&1
+          code=$?
+          set -e
+          cat out.log
+          if [ "$code" -ne 78 ]; then
+            echo "::error::Expected exit 78 (EX_CONFIG), got $code"
+            exit 1
+          fi
+      - name: A safe production config must get past the gate
+        working-directory: backend
+        run: |
+          set +e
+          NODE_ENV=production \
+          DESK_AUTH=jwt \
+          JWT_SECRET="$(node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))")" \
+          CORS_ORIGIN=https://goldenhour.example \
+          DB_DRIVER=mysql \
+          HACKATHON_MODE=false \
+          ALLOW_MANUAL_HOSPITAL_OVERRIDE=false \
+          node src/server.js > out.log 2>&1
+          code=$?
+          set -e
+          cat out.log
+          # It exits 1 because no MySQL is reachable in CI — which is itself the
+          # point: production must fail loudly rather than fall back to memory.
+          if grep -q "refuses to start with this configuration" out.log; then
+            echo "::error::A correct production config was rejected by the security gate"
+            exit 1
+          fi
+          if ! grep -q "server failed to start" out.log; then
+            echo "::error::Expected a loud database failure, got something else"
+            exit 1
+          fi

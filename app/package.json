@@ -1,0 +1,26 @@
+{
+  "name": "goldenhour-apk",
+  "version": "5.0.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "pretest": "npm run build",
+    "test": "node tests/test.js && node tests/config.test.js && node tests/location.test.js && node tests/functional.test.js",
+    "cap:add": "cap add android",
+    "cap:sync": "cap sync android",
+    "apk": "npm run build && cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/camera": "^8.2.4",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/geolocation": "^8.2.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
+    "jsdom": "^25.0.1",
+    "vite": "^5.4.10"
+  }
+}
