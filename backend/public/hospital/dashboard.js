@@ -16,18 +16,18 @@ var __objRest = (source, exclude) => {
 (function() {
   "use strict";
   const AGE_BANDS = [
-    { id: "baby", label: "Baby", hint: "Under 2", value: 1, min: 0, max: 1 },
-    { id: "child", label: "Child", hint: "2 – 12", value: 8, min: 2, max: 12 },
-    { id: "adult", label: "Adult", hint: "13 – 64", value: 35, min: 13, max: 64 },
-    { id: "senior", label: "Senior citizen", hint: "65+", value: 75, min: 65, max: 130 },
+    { id: "baby", label: "Baby", hint: "0 – 3", value: 1, min: 0, max: 3 },
+    { id: "child", label: "Child", hint: "3 – 17", value: 8, min: 3, max: 18 },
+    { id: "adult", label: "Adult", hint: "18 – 60", value: 35, min: 18, max: 60 },
+    { id: "senior", label: "Senior citizen", hint: "60+", value: 75, min: 60, max: 131 },
     { id: "unknown", label: "Unknown", hint: "Not known", value: null, min: null, max: null }
   ];
   const UNKNOWN = AGE_BANDS[AGE_BANDS.length - 1];
   function describeAgeBand(age) {
-    if (age === null || age === void 0 || age === "") return UNKNOWN;
+    if (age === null || age === void 0 || !["number", "string"].includes(typeof age) || String(age).trim() === "") return UNKNOWN;
     const n = Number(age);
-    if (!Number.isFinite(n)) return UNKNOWN;
-    return AGE_BANDS.find((b) => b.min !== null && n >= b.min && n <= b.max) || AGE_BANDS[2];
+    if (!Number.isFinite(n) || n < 0 || n > 130) return UNKNOWN;
+    return AGE_BANDS.find((b) => b.min !== null && n >= b.min && n < b.max) || UNKNOWN;
   }
   function ageBandLabel(age) {
     return describeAgeBand(age).label;

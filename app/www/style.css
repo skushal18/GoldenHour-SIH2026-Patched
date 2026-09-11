@@ -6,22 +6,18 @@
    APK, where a runtime stylesheet fetch is one more file to get wrong and one
    more blocking request on a dead network.
    ========================================================================== */
-/* ============================================================================
-   GoldenHour v5 — design tokens. Single source of truth for both front-ends.
-   Light is base. Dark redefines colour tokens ONLY — never a size, radius,
-   duration or weight, so the two themes can never drift in layout.
-   ========================================================================== */
+/* Cyan navigation, orange actions; shared light/dark acrylic tokens. */
+
 
 :root{
-  /* ── Type ────────────────────────────────────────────────────────────
-     System stack, no web fonts: the APK must render offline. */
+  
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text",
                "Segoe UI Variable Text", "Segoe UI", Roboto,
                "Helvetica Neue", system-ui, sans-serif;
   --font-num:  ui-rounded, -apple-system, "SF Pro Rounded",
                "Segoe UI Variable Display", Roboto, system-ui, sans-serif;
 
-  /* Six sizes. Android WebView rounds half-pixels inconsistently between DPI buckets. */
+  
   --t-micro:  11px;
   --t-small:  13px;
   --t-body:   15px;
@@ -29,7 +25,7 @@
   --t-title:  20px;
   --t-display:26px;
 
-  /* Four weights. The system stack renders four; asking for 18 was theatre. */
+  
   --w-regular: 400;
   --w-medium:  500;
   --w-semi:    600;
@@ -38,127 +34,110 @@
   --lh-tight: 1.2;
   --lh-body:  1.45;
 
-  /* ── Space — 4px base, eight steps. No value off this scale. ─────────── */
+  
   --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px;
   --s-5: 20px; --s-6: 24px; --s-7: 32px; --s-8: 48px;
 
-  /* ── Radius ─────────────────────────────────────────────────────── */
+  
   --r-xs:   6px;
   --r-sm:  10px;
   --r-md:  14px;
-  --r-lg:  18px;
-  --r-xl:  26px;
+  --r-lg:  24px;
+  --r-xl:  30px;
   --r-pill: 999px;
 
-  /* ── Tap targets (WCAG 2.5.5 says 44 px minimum) ────────────────── */
+  
   --tap-sm: 44px;
   --tap:    54px;
   --tap-lg: 60px;
 
-  /* ── Surfaces ───────────────────────────────────────────────────────
-     The five-colour GoldenHour palette:
-       #FFFFFF  cards and sheets
-       #EDF6FF  the page wash everything floats on
-       #B7D7F0  hairlines and secondary surfaces
-       #5A9BD5  the interactive blue
-       #1F3F66  headings and strong text
-     Surfaces are acrylic: a translucent white over the wash, blurred. The
-     solid values below are what a browser without backdrop-filter falls back
-     to, and what the contrast checker measures — so every ratio in this file
-     holds even when the blur does not render. */
-  --page:      #EDF6FF;
+  
+  --page:      #ECFAFC;
   --surface:   #FFFFFF;
-  --surface-2: #F5FAFF;
+  --surface-2: #F4FCFD;
 
-  /* The translucent forms of the same surfaces. Paired with --blur-*. */
+  
   --glass:     rgba(255,255,255,.72);
   --glass-2:   rgba(255,255,255,.56);
-  --glass-edge:rgba(255,255,255,.85);   /* the 1px top highlight on a card */
+  --glass-edge:rgba(255,255,255,.85);   
   --blur:      saturate(160%) blur(18px);
   --blur-lg:   saturate(170%) blur(28px);
 
-  /* ── Borders — TWO tiers (WCAG 1.4.11 Non-text Contrast) ──────── */
-  --divider:     #DCEAF8;
-  --line:        #B7D7F0;
-  --line-strong: #6B89A8;   /* 3.6:1 on white, ≥3:1 on every other surface */
+  
+  --divider:     #D7EEF0;
+  --line:        #B5DFE5;
+  --line-strong: #60858C;   
 
-  /* ── Ink — three levels. --faint is deliberately absent. ───────────── */
-  --ink:    #1F3F66;
-  --ink-2:  #33547F;
-  --muted:  #54708F;
+  
+  --ink:    #153E48;
+  --ink-2:  #315963;
+  --muted:  #506E75;
 
-  /* ── Brand: blue = chosen / informational ──────────────────────────── */
-  --brand-fill:  #5A9BD5;
-  --brand-fill-2:#7FB6E4;
-  --brand-ink:   #175B93;
-  --brand-wash:  #E1EFFC;
-  --brand-line:  #2E7CBE;
-  --on-brand:    #0B2138;
+  
+  --brand-fill:  #22C6DE;
+  --brand-fill-2:#79E6F2;
+  --brand-ink:   #006B7C;
+  --brand-wash:  #D9F6FA;
+  --brand-line:  #00869A;
+  --on-brand:    #07343D;
 
-  /* ── Accent: deep blue = act. Exactly one per screen. ──────────────────
-     The old system used coral here. In an all-blue palette the two still
-     have to be told apart at a glance, so "chosen" stays light (a wash with
-     a blue edge) and "act" goes dark and saturated with white text. Depth,
-     not hue, is what separates them now. */
-  --accent-fill:  #2A6BA8;
-  --accent-fill-2:#3C82C4;
-  --accent-fill-3:#1F3F66;
-  --accent-ink:   #1B4F80;
-  --accent-wash:  #E4EFFA;
-  --accent-line:  #2A6BA8;
-  --on-accent:    #FFFFFF;
+  
+  --accent-fill:  #F58A28;
+  --accent-fill-2:#FFA64D;
+  --accent-fill-3:#EF7D20;
+  --accent-ink:   #934000;
+  --accent-wash:  #FFF0DF;
+  --accent-line:  #AE570F;
+  --on-accent:    #351B08;
 
-  /* ── Clinical semantics. Never the brand blue: a warning must not read
-        as a button, and a button must not read as a warning. These are the
-        only non-blue colours the interface is allowed. ───────────────── */
+  
   --good-ink:#097553; --good-wash:#E2F4EC; --good-line:#1F9169; --good-fill:#0F9D74;
   --caution-ink:#7E5400; --caution-wash:#FAF0DB; --caution-line:#AD7B20; --caution-fill:#E0A22E;
   --critical-ink:#BE1226; --critical-wash:#FCE8EA; --critical-line:#D93B4F; --critical-fill:#D92D3F;
   --on-critical:#FFFFFF;
   --on-caution:#3D2A05;
 
-  /* ── Categorical palette for charts (NOT cyan/coral) ───────────── */
+  
   --cat-1:#5B6BF2; --cat-2:#1F9169; --cat-3:#B07A12; --cat-4:#7F4FB8; --cat-5:#0E8F92; --cat-6:#BE1226;
 
-  /* ── Elevation ──────────────────────────────────────────────────── */
+  
   --e-0: none;
   --e-1: 0 1px 2px rgba(31,63,102,.05), 0 2px 10px -6px rgba(31,63,102,.14);
   --e-2: 0 10px 30px -16px rgba(31,63,102,.26), 0 2px 8px -4px rgba(31,63,102,.12);
   --focus: 0 0 0 3px var(--brand-line), 0 0 0 1px var(--brand-ink);
 
-  /* ── Motion ─────────────────────────────────────────────────────────── */
-  --d-fast:  110ms;   /* press feedback, hover                */
-  --d-base:  190ms;   /* colour, border, opacity              */
-  --d-slow:  280ms;   /* sheets, cards entering or leaving    */
-  /* Standard and decelerate. Neither overshoots: an interface somebody reads
-     under pressure should settle, not bounce. */
+  
+  --d-fast:  110ms;   
+  --d-base:  190ms;   
+  --d-slow:  280ms;   
+  
   --ease:    cubic-bezier(.2,0,0,1);
   --ease-out:cubic-bezier(.16,1,.3,1);
 
-  /* ── Safe areas ─────────────────────────────────────────────────────── */
+  
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
 
-  /* ── Layout ───────────────────────────────────────────────────────────── */
+  
   --app-max:   560px;
   --board-max: 1560px;
 }
 
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --page:#0B1622; --surface:#12202F; --surface-2:#19293B;
-    --glass:rgba(18,32,47,.72); --glass-2:rgba(18,32,47,.56); --glass-edge:rgba(146,184,222,.14);
-    --divider:#23384E; --line:#2D4761; --line-strong:#7190AE;
+    --page:#071C23; --surface:#102B34; --surface-2:#17343E;
+    --glass:rgba(16,43,52,.72); --glass-2:rgba(16,43,52,.56); --glass-edge:rgba(133,232,242,.22);
+    --divider:#23454F; --line:#305662; --line-strong:#6D98A3;
     --ink:#E9F2FB; --ink-2:#C1D5E8; --muted:#96ADC5;
-    --brand-fill:#5A9BD5; --brand-fill-2:#7FB6E4; --brand-ink:#79BEF0;
-    --brand-wash:#102A41; --brand-line:#3E7CB0; --on-brand:#07192B;
-    --accent-fill:#4A8FCE; --accent-fill-2:#6BA6DC; --accent-fill-3:#2A6BA8;
-    --accent-ink:#8CC6F2; --accent-wash:#12283D; --accent-line:#4479A8; --on-accent:#06182A;
+    --brand-fill:#22C6DE; --brand-fill-2:#79E6F2; --brand-ink:#6EE4F2;
+    --brand-wash:#103C46; --brand-line:#269FB2; --on-brand:#07192B;
+    --accent-fill:#FF9C42; --accent-fill-2:#FFB874; --accent-fill-3:#F58A28;
+    --accent-ink:#FFB874; --accent-wash:#3A281C; --accent-line:#C77831; --on-accent:#351B08;
     --good-ink:#35D9A6; --good-wash:#0D2C24; --good-line:#2A8D6C; --good-fill:#2ED3A0;
     --caution-ink:#F5C56E; --caution-wash:#2E2410; --caution-line:#9C7A2A; --caution-fill:#F0B95E;
-    --critical-ink:#FF8496; --critical-wash:#33161C; --critical-line:#B54B59; --critical-fill:#FF5A70;
+    --critical-ink:#FF8496; --critical-wash:#33161C; --critical-line:#C45766; --critical-fill:#FF5A70;
     --on-critical:#2B0208; --on-caution:#2E1F04;
     --e-1:0 1px 2px rgba(0,0,0,.5), 0 2px 10px -6px rgba(0,0,0,.6);
     --e-2:0 12px 32px -18px rgba(0,0,0,.8), 0 2px 8px -4px rgba(0,0,0,.6);
@@ -166,17 +145,17 @@
   }
 }
 :root[data-theme="dark"]{
-  --page:#0B1622; --surface:#12202F; --surface-2:#19293B;
-  --glass:rgba(18,32,47,.72); --glass-2:rgba(18,32,47,.56); --glass-edge:rgba(146,184,222,.14);
-  --divider:#23384E; --line:#2D4761; --line-strong:#7190AE;
+  --page:#071C23; --surface:#102B34; --surface-2:#17343E;
+  --glass:rgba(16,43,52,.72); --glass-2:rgba(16,43,52,.56); --glass-edge:rgba(133,232,242,.22);
+  --divider:#23454F; --line:#305662; --line-strong:#6D98A3;
   --ink:#E9F2FB; --ink-2:#C1D5E8; --muted:#96ADC5;
-  --brand-fill:#5A9BD5; --brand-fill-2:#7FB6E4; --brand-ink:#79BEF0;
-  --brand-wash:#102A41; --brand-line:#3E7CB0; --on-brand:#07192B;
-  --accent-fill:#4A8FCE; --accent-fill-2:#6BA6DC; --accent-fill-3:#2A6BA8;
-  --accent-ink:#8CC6F2; --accent-wash:#12283D; --accent-line:#4479A8; --on-accent:#06182A;
+  --brand-fill:#22C6DE; --brand-fill-2:#79E6F2; --brand-ink:#6EE4F2;
+  --brand-wash:#103C46; --brand-line:#269FB2; --on-brand:#07192B;
+  --accent-fill:#FF9C42; --accent-fill-2:#FFB874; --accent-fill-3:#F58A28;
+  --accent-ink:#FFB874; --accent-wash:#3A281C; --accent-line:#C77831; --on-accent:#351B08;
   --good-ink:#35D9A6; --good-wash:#0D2C24; --good-line:#2A8D6C; --good-fill:#2ED3A0;
   --caution-ink:#F5C56E; --caution-wash:#2E2410; --caution-line:#9C7A2A; --caution-fill:#F0B95E;
-  --critical-ink:#FF8496; --critical-wash:#33161C; --critical-line:#B54B59; --critical-fill:#FF5A70;
+  --critical-ink:#FF8496; --critical-wash:#33161C; --critical-line:#C45766; --critical-fill:#FF5A70;
   --on-critical:#2B0208; --on-caution:#2E1F04;
   --e-1:0 1px 2px rgba(0,0,0,.5), 0 2px 10px -6px rgba(0,0,0,.6);
   --e-2:0 12px 32px -18px rgba(0,0,0,.8), 0 2px 8px -4px rgba(0,0,0,.6);
@@ -499,6 +478,17 @@ textarea{
   }
 }
 
+/* Liquid glass: a stationary specular highlight over frosted surfaces. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .acrylic, .card {
+    background: linear-gradient(135deg, var(--glass-edge), transparent 42%), var(--glass);
+    box-shadow: var(--e-2), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 var(--line);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .acrylic, .card, .sheet { background: var(--surface) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+}
+
 /* ── Shell ─────────────────────────────────────────────────────────────── */
 
 body{ background: var(--page); }
@@ -509,17 +499,17 @@ body{ background: var(--page); }
 .ambient{
   position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(90vw 60vh at 12% -8%,  rgba(90,155,213,.20), transparent 62%),
-    radial-gradient(80vw 55vh at 96% 6%,   rgba(183,215,240,.34), transparent 58%),
-    radial-gradient(70vw 50vh at 50% 108%, rgba(90,155,213,.14), transparent 60%);
+    radial-gradient(90vw 60vh at 12% -8%,  rgba(34,198,222,.20), transparent 62%),
+    radial-gradient(80vw 55vh at 96% 6%,   rgba(255,156,66,.34), transparent 58%),
+    radial-gradient(70vw 50vh at 50% 108%, rgba(34,198,222,.14), transparent 60%);
 }
 :root:not([data-theme="light"]) .ambient{ opacity: 1; }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]) .ambient{
     background:
-      radial-gradient(90vw 60vh at 12% -8%,  rgba(90,155,213,.16), transparent 62%),
-      radial-gradient(80vw 55vh at 96% 6%,   rgba(31,63,102,.42),  transparent 58%),
-      radial-gradient(70vw 50vh at 50% 108%, rgba(90,155,213,.10), transparent 60%);
+      radial-gradient(90vw 60vh at 12% -8%,  rgba(34,198,222,.16), transparent 62%),
+      radial-gradient(80vw 55vh at 96% 6%,   rgba(170,89,28,.42),  transparent 58%),
+      radial-gradient(70vw 50vh at 50% 108%, rgba(34,198,222,.10), transparent 60%);
   }
 }
 
@@ -1129,3 +1119,13 @@ button:disabled:active{ transform: none; }
   .band-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); }
   .active-status{ flex-direction: column; }
 }
+
+/* Four age choices, with an explicit unknown option beneath. */
+.band-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: var(--s-2); border-radius: var(--r-lg); background: var(--surface-2); }
+.band { min-height: 72px; position: relative; }
+.band b { text-transform: uppercase; letter-spacing: .035em; }
+.band[data-age-band="unknown"] { grid-column: 1 / -1; min-height: var(--tap-sm); flex-direction: row; gap: var(--s-2); }
+.band.is-on { box-shadow: inset 0 1px 0 var(--glass-edge), 0 3px 12px -5px var(--brand-line); }
+.hero { border-top: 3px solid var(--brand-fill); }
+.brand-name em { color: var(--accent-ink); }
+.tab.is-on { box-shadow: inset 0 2px 0 var(--brand-line); }

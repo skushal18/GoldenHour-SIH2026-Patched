@@ -20,7 +20,7 @@
 
 window.GH_CONFIG = {
   /* "" = auto-detect from the page URL. Set explicitly for the APK. */
-  SERVER_BASE: "",
+  SERVER_BASE: "https://goldenhour-sih2026-patched-production.up.railway.app",
 
   API_PATH: "/api/v1",
 

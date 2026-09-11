@@ -314,3 +314,14 @@ textarea{
     transition-duration: .001ms !important;
   }
 }
+
+/* Liquid glass: a stationary specular highlight over frosted surfaces. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .acrylic, .card {
+    background: linear-gradient(135deg, var(--glass-edge), transparent 42%), var(--glass);
+    box-shadow: var(--e-2), inset 0 1px 0 var(--glass-edge), inset 0 -1px 0 var(--line);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .acrylic, .card, .sheet { background: var(--surface) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+}

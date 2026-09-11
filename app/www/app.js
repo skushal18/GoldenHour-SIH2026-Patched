@@ -1,10 +1,10 @@
 (function() {
   "use strict";
   const AGE_BANDS = [
-    { id: "baby", label: "Baby", hint: "Under 2", value: 1, min: 0, max: 1 },
-    { id: "child", label: "Child", hint: "2 – 12", value: 8, min: 2, max: 12 },
-    { id: "adult", label: "Adult", hint: "13 – 64", value: 35, min: 13, max: 64 },
-    { id: "senior", label: "Senior citizen", hint: "65+", value: 75, min: 65, max: 130 },
+    { id: "baby", label: "Baby", hint: "0 – 3", value: 1, min: 0, max: 3 },
+    { id: "child", label: "Child", hint: "3 – 17", value: 8, min: 3, max: 18 },
+    { id: "adult", label: "Adult", hint: "18 – 60", value: 35, min: 18, max: 60 },
+    { id: "senior", label: "Senior citizen", hint: "60+", value: 75, min: 60, max: 131 },
     { id: "unknown", label: "Unknown", hint: "Not known", value: null, min: null, max: null }
   ];
   const UNKNOWN = AGE_BANDS[AGE_BANDS.length - 1];
@@ -12,10 +12,10 @@
     return AGE_BANDS.find((b) => b.id === id) || null;
   }
   function describeAgeBand(age) {
-    if (age === null || age === void 0 || age === "") return UNKNOWN;
+    if (age === null || age === void 0 || !["number", "string"].includes(typeof age) || String(age).trim() === "") return UNKNOWN;
     const n = Number(age);
-    if (!Number.isFinite(n)) return UNKNOWN;
-    return AGE_BANDS.find((b) => b.min !== null && n >= b.min && n <= b.max) || AGE_BANDS[2];
+    if (!Number.isFinite(n) || n < 0 || n > 130) return UNKNOWN;
+    return AGE_BANDS.find((b) => b.min !== null && n >= b.min && n < b.max) || UNKNOWN;
   }
   function ageBandLabel(age) {
     return describeAgeBand(age).label;
@@ -985,6 +985,7 @@
         const isOn = b.dataset.ageBand === bandId;
         b.classList.toggle("is-on", isOn);
         b.setAttribute("aria-checked", isOn ? "true" : "false");
+        b.tabIndex = isOn ? 0 : -1;
       });
     }
     function setAgeBand(bandId, opts) {
@@ -1001,6 +1002,19 @@
     on($("ageChips"), "click", (e) => {
       const b = e.target.closest(".band");
       if (b) setAgeBand(b.dataset.ageBand);
+    });
+    ["ageChips", "editAgeChips"].forEach((id) => {
+      on($(id), "keydown", (e) => {
+        const keys = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"];
+        if (!keys.includes(e.key)) return;
+        const buttons = Array.from($(id).querySelectorAll(".band"));
+        const index = buttons.indexOf(e.target.closest(".band"));
+        if (index < 0) return;
+        e.preventDefault();
+        const next = e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : (index + (["ArrowRight", "ArrowDown"].includes(e.key) ? 1 : -1) + buttons.length) % buttons.length;
+        buttons[next].click();
+        buttons[next].focus();
+      });
     });
     function markAnswered() {
       const age = $("ageChips");
@@ -1842,7 +1856,7 @@
       const patch = {
         /* `null` is a real choice here — it is what "Unknown" means — so the
            key is sent whenever a band is selected, including that one. */
-        age: band ? band.value : void 0,
+        age: band ? band.id === "unknown" ? null : describeAgeBand((state.lastPayload || {}).age).id === band.id ? (state.lastPayload || {}).age : band.value : void 0,
         gender: genderEl ? genderEl.dataset.value : void 0,
         blood_group: bloodEl ? bloodEl.dataset.blood : void 0,
         consciousness: consciousEl ? consciousEl.dataset.value : void 0,

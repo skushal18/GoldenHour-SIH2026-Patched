@@ -48,7 +48,8 @@ function boot(options) {
   var w = dom.window;
 
   w.eval(configSource);
-  if (opts.serverBase !== undefined) w.GH_CONFIG.SERVER_BASE = opts.serverBase;
+  // Environment scenarios explicitly start unconfigured; shipped APK may be configured.
+  w.GH_CONFIG.SERVER_BASE = opts.serverBase === undefined ? '' : opts.serverBase;
   if (opts.mode !== undefined) w.GH_CONFIG.MODE = opts.mode;
 
   /* The Capacitor bridge is injected into the WebView before app.js runs. */
@@ -65,10 +66,10 @@ function boot(options) {
 }
 
 group("Shipped config defaults");
-check("config.js ships with an empty SERVER_BASE so a browser build auto-detects", function () {
+check("config.js ships with a blank or valid HTTP(S) backend", function () {
   var dom = new JSDOM("", { runScripts: "outside-only" });
   dom.window.eval(configSource);
-  assert.strictEqual(dom.window.GH_CONFIG.SERVER_BASE, "");
+  assert.ok(dom.window.GH_CONFIG.SERVER_BASE === "" || /^https?:\/\/[^\s]+$/.test(dom.window.GH_CONFIG.SERVER_BASE));
   assert.strictEqual(dom.window.GH_CONFIG.API_PATH, "/api/v1");
   assert.strictEqual(dom.window.GH_CONFIG.MODE, "auto");
   dom.window.close();

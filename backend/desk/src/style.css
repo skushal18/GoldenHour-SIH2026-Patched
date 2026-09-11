@@ -18,16 +18,16 @@ body {
 .ambient{
   position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(60vw 70vh at 4% -10%,  rgba(90,155,213,.18), transparent 60%),
-    radial-gradient(55vw 60vh at 98% 4%,   rgba(183,215,240,.30), transparent 58%),
-    radial-gradient(70vw 60vh at 50% 106%, rgba(90,155,213,.12), transparent 62%);
+    radial-gradient(60vw 70vh at 4% -10%,  rgba(34,198,222,.18), transparent 60%),
+    radial-gradient(55vw 60vh at 98% 4%,   rgba(255,156,66,.30), transparent 58%),
+    radial-gradient(70vw 60vh at 50% 106%, rgba(34,198,222,.12), transparent 62%);
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]) .ambient{
     background:
-      radial-gradient(60vw 70vh at 4% -10%, rgba(90,155,213,.14), transparent 60%),
-      radial-gradient(55vw 60vh at 98% 4%,  rgba(31,63,102,.40),  transparent 58%),
-      radial-gradient(70vw 60vh at 50% 106%, rgba(90,155,213,.09), transparent 62%);
+      radial-gradient(60vw 70vh at 4% -10%, rgba(34,198,222,.14), transparent 60%),
+      radial-gradient(55vw 60vh at 98% 4%,  rgba(170,89,28,.40),  transparent 58%),
+      radial-gradient(70vw 60vh at 50% 106%, rgba(34,198,222,.09), transparent 62%);
   }
 }
 

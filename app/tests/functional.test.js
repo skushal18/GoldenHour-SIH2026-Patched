@@ -232,6 +232,22 @@ async function main() {
     assert.strictEqual(w.GH.describeAgeBand($("age").value).id, "unknown");
     $("ageChips").querySelector("[data-age-band='adult']").click();
   });
+  check("age groups cover boundaries and reject invalid ages", function () {
+    [[0, 'baby'], [2.9, 'baby'], [3, 'child'], [17, 'child'], [17.9, 'child'],
+     [18, 'adult'], [59.9, 'adult'], [60, 'senior'], [130, 'senior'],
+     [-1, 'unknown'], [131, 'unknown'], ['bad', 'unknown'], [null, 'unknown'], [true, 'unknown'], ['  ', 'unknown']].forEach(function (pair) {
+       assert.strictEqual(w.GH.describeAgeBand(pair[0]).id, pair[1]);
+     });
+  });
+  check("age toggle supports arrow-key selection and one tab stop", function () {
+    var adult = $("ageChips").querySelector("[data-age-band='adult']");
+    adult.focus();
+    adult.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    assert.strictEqual(w.__GH.state().selected.ageBand, 'senior');
+    assert.strictEqual(d.activeElement.dataset.ageBand, 'senior');
+    assert.strictEqual($("ageChips").querySelectorAll('[tabindex="0"]').length, 1);
+    adult.click();
+  });
   check("age and sex are marked required, and neither blocks a broadcast", function () {
     assert.strictEqual($("ageChips").getAttribute("aria-required"), "true");
     assert.strictEqual($("genderSeg").getAttribute("aria-required"), "true");
@@ -324,6 +340,7 @@ async function main() {
   typeIn("systolicBp", 82);
   $("ambulanceId").value = "KA01AB1234";
 
+  $("age").value = "42"; // Existing exact-age record must survive unrelated edits.
   var res = await w.__GH.submitLoop();
   var payload = w.__GH_LAST_PAYLOAD;
 
@@ -367,6 +384,20 @@ async function main() {
   });
   check("the submit button is released again", function () {
     assert.strictEqual($("submitBtn").disabled, false);
+  });
+
+  check("editing patient notes preserves a known exact age", function () {
+    $("editPatientBtn").click();
+    $("editNotes").value = "Updated notes";
+    $("editSaveBtn").click();
+    assert.strictEqual(w.__GH_LAST_PAYLOAD.age, 42);
+    assert.strictEqual(w.__GH_LAST_PAYLOAD.notes, "Updated notes");
+  });
+  check("editing the age group still changes the patient age band", function () {
+    $("editAgeChips").querySelector("[data-age-band='senior']").click();
+    $("editSaveBtn").click();
+    assert.strictEqual(w.GH.describeAgeBand(w.__GH_LAST_PAYLOAD.age).id, 'senior');
+    $("editCancelBtn").click();
   });
 
   /* ── 11. Live acceptance ─────────────────────────────────── */

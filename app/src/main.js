@@ -411,6 +411,7 @@ function boot(win, doc) {
       const isOn = b.dataset.ageBand === bandId;
       b.classList.toggle('is-on', isOn);
       b.setAttribute('aria-checked', isOn ? 'true' : 'false');
+      b.tabIndex = isOn ? 0 : -1;
     });
   }
 
@@ -429,6 +430,21 @@ function boot(win, doc) {
   on($('ageChips'), 'click', e => {
     const b = e.target.closest('.band');
     if (b) setAgeBand(b.dataset.ageBand);
+  });
+
+  ['ageChips', 'editAgeChips'].forEach(id => {
+    on($(id), 'keydown', e => {
+      const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+      if (!keys.includes(e.key)) return;
+      const buttons = Array.from($(id).querySelectorAll('.band'));
+      const index = buttons.indexOf(e.target.closest('.band'));
+      if (index < 0) return;
+      e.preventDefault();
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1
+        : (index + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next].click();
+      buttons[next].focus();
+    });
   });
 
   /* ── Required-but-never-blocking ───────────────────────────────────────
@@ -1249,7 +1265,8 @@ function boot(win, doc) {
     const patch = {
       /* `null` is a real choice here — it is what "Unknown" means — so the
          key is sent whenever a band is selected, including that one. */
-      age: band ? band.value : undefined,
+      age: band ? (band.id === 'unknown' ? null : describeAgeBand((state.lastPayload || {}).age).id === band.id
+        ? (state.lastPayload || {}).age : band.value) : undefined,
       gender: genderEl ? genderEl.dataset.value : undefined,
       blood_group: bloodEl ? bloodEl.dataset.blood : undefined,
       consciousness: consciousEl ? consciousEl.dataset.value : undefined,
