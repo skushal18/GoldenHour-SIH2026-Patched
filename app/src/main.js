@@ -12,6 +12,9 @@
    ========================================================================== */
 
 import './styles.css';
+import { Geolocation } from '@capacitor/geolocation';
+import { watchPosition } from './modules/position-watch.js';
+import { recordArrival } from './modules/arrival.js';
 
 import {
   MAX_IMAGES, VITAL_KEYS, DEMO_CASE_TYPES, CATEGORY_LABELS,
@@ -674,7 +677,14 @@ function boot(win, doc) {
       setLocation({ lat: 12.9716, lng: 77.5946, accuracy: null, source: 'demo' });
       return;
     }
-    const geo = win.navigator && win.navigator.geolocation;
+    const geo = isCapacitorRuntime(win) ? {
+      getCurrentPosition: (success, failure, options) => {
+        Geolocation.requestPermissions({ permissions: ['location'] }).then(permission => {
+          if (permission.location !== 'granted') throw new Error('Precise location permission is required');
+          return Geolocation.getCurrentPosition(options);
+        }).then(success, failure);
+      }
+    } : win.navigator && win.navigator.geolocation;
     if (!geo || typeof geo.getCurrentPosition !== 'function') {
       setLocationFailed(noGeolocationMessage());
       return;
@@ -1045,8 +1055,8 @@ function boot(win, doc) {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
     if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
     if (socket) { try { socket.disconnect(); } catch (_) {} socket = null; }
-    if (geoWatch != null && win.navigator && win.navigator.geolocation) {
-      try { win.navigator.geolocation.clearWatch(geoWatch); } catch (_) {}
+    if (geoWatch != null) {
+      try { geoWatch(); } catch (_) {}
       geoWatch = null;
     }
   }
@@ -1086,6 +1096,8 @@ function boot(win, doc) {
       caseBook.setStatus(state.activeCaseCode, body.status, extra);
     }
     if (body.status === 'ACCEPTED') startSharingPosition(body);
+    if (['ARRIVED', 'CANCELLED', 'EXPIRED', 'REJECTED'].includes(body.status)) stopSharingPosition();
+    if (body.status === 'ACCEPTED') paintTracking(body);
     if (body.status === 'ARRIVED') {
       const banner = $('arrivedBanner');
       if (banner) banner.hidden = false;
@@ -1104,6 +1116,7 @@ function boot(win, doc) {
     socket.on('connect', () => socket.emit('case:follow', caseCode));
     socket.on('case:status', body => applyStatus(normaliseStatus(body)));
     socket.on('case:position', body => paintTracking(body));
+    socket.on('disconnect', () => { const t = $('trackingText'); if (t) t.textContent = 'Disconnected — hospital is not receiving location updates'; });
     socket.on('patient:updated', () => {
       const t = $('updateTicker');
       if (!t) return;
@@ -1118,35 +1131,54 @@ function boot(win, doc) {
     if (tracking) tracking.hidden = false;
     if (state.demo || geoWatch != null) return;
     const geo = win.navigator && win.navigator.geolocation;
-    if (!geo || typeof geo.watchPosition !== 'function' || !socket) return;
-
-    /* Positions are shared only between acceptance and arrival, only with the
-       hospital that accepted, and at most once every 10 s — high-accuracy
-       watchPosition is the biggest battery draw in the app. */
+    if (!socket) { const t = $('trackingText'); if (t) t.textContent = 'Live tracking unavailable — realtime connection is required'; return; }
+    const code = state.activeCaseCode;
+    const text = $('trackingText');
+    if (text) text.textContent = 'Waiting for GPS and server confirmation…';
     let lastSent = 0;
-    geoWatch = geo.watchPosition(pos => {
-      const now = Date.now();
-      if (now - lastSent < 10000) return;
-      const c = pos && pos.coords;
-      const coords = validCoords(c && c.latitude, c && c.longitude);
-      if (!coords || !socket) return;
-      lastSent = now;
-      socket.emit('ambulance:position', {
-        case_code: state.activeCaseCode,
-        lat: coords.lat, lng: coords.lng,
-        accuracy_m: toNumberOrNull(c.accuracy),
-        speed_kmh: c.speed != null ? Math.round(c.speed * 3.6) : null,
-        source: 'gps',
-        at: new Date().toISOString(),
-      });
-    }, () => {}, { enableHighAccuracy: true, maximumAge: 5000 });
+    geoWatch = watchPosition({ native: isCapacitorRuntime(win), plugin: Geolocation, geolocation: geo,
+      onPosition: pos => {
+        if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== 'ACCEPTED') return;
+        if (!socket || !socket.connected) { if (text) text.textContent = 'Disconnected — hospital is not receiving location updates'; return; }
+        const now = Date.now();
+        if (now - lastSent < 10000) return;
+        const c = pos && pos.coords;
+        const coords = validCoords(c && c.latitude, c && c.longitude);
+        const timestamp = pos && pos.timestamp;
+        if (!coords || !Number.isFinite(timestamp) || now - timestamp > 30000 || timestamp > now + 30000 || c.accuracy > 200) {
+          if (text) text.textContent = 'Waiting for a fresh, accurate GPS fix…';
+          return;
+        }
+        lastSent = now;
+        // Do not buffer old positions across a socket outage.
+        let confirmed = false;
+        const timer = setTimeout(() => { if (!confirmed && text && state.activeCaseCode === code) text.textContent = 'Location delivery unconfirmed — waiting for connection'; }, 6000);
+        socket.volatile.emit('ambulance:position', {
+          case_code: code, lat: coords.lat, lng: coords.lng,
+          accuracy_m: toNumberOrNull(c.accuracy),
+          speed_kmh: c.speed != null && c.speed >= 0 ? Math.round(c.speed * 3.6) : null,
+          source: 'gps', at: new Date(timestamp).toISOString(),
+        }, ack => {
+          confirmed = true; clearTimeout(timer);
+          if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== 'ACCEPTED') return;
+          if (text) text.textContent = ack && ack.success ? 'GPS location delivered to the accepting hospital' : 'Location was not accepted — waiting for a fresh fix';
+        });
+      },
+      onError: err => { if (text) text.textContent = 'GPS unavailable — check location permission and keep the app open'; },
+    });
   }
+
+  on($('retryTrackingBtn'), 'click', () => {
+    if ((caseBook.get(state.activeCaseCode) || {}).status !== 'ACCEPTED') return;
+    stopSharingPosition();
+    startSharingPosition({});
+  });
 
   function stopSharingPosition() {
     const tracking = $('activeTracking');
     if (tracking) tracking.hidden = true;
-    if (geoWatch != null && win.navigator && win.navigator.geolocation) {
-      try { win.navigator.geolocation.clearWatch(geoWatch); } catch (_) {}
+    if (geoWatch != null) {
+      try { geoWatch(); } catch (_) {}
       geoWatch = null;
     }
   }
@@ -1156,7 +1188,10 @@ function boot(win, doc) {
     const eta = $('activeEta');
     if (body && body.live_eta_minutes != null && eta) eta.textContent = body.live_eta_minutes + ' min';
     if (!text || !body) return;
-    text.textContent = body.eta_source === 'stalled'
+    if (body.eta_source === 'stale') { text.textContent = 'Location is stale — hospital is waiting for a fresh GPS fix'; if (eta) eta.textContent = 'Unavailable'; return; }
+    if (!socket || !socket.connected) { text.textContent = 'Disconnected — hospital is not receiving location updates'; return; }
+    if (!body.position_at && !body.at) return;
+    text.textContent = ['stalled', 'stationary'].includes(body.eta_source)
       ? 'Not moving — tell the hospital if you are delayed'
       : 'Sharing location with the accepting hospital' +
         (body.live_eta_minutes != null ? ' · ' + body.live_eta_minutes + ' min out' : '');
@@ -1178,21 +1213,9 @@ function boot(win, doc) {
     if (win.confirm && !win.confirm('Record arrival and close this case?')) return;
 
     arrivalInFlight = true;
-    stopSharingPosition();
     try {
-      if (socket && socket.connected) {
-        await new Promise(resolve => {
-          let done = false;
-          const finish = () => { if (!done) { done = true; resolve(); } };
-          socket.emit('ambulance:arrived', { case_code: state.activeCaseCode }, body => {
-            if (body && body.success === false) toast(body.message || 'The server refused the arrival');
-            finish();
-          });
-          setTimeout(finish, 4000);
-        });
-      } else if (!state.demo && env.apiRoot) {
-        await win.fetch(env.apiRoot + '/requests/' + encodeURIComponent(state.activeCaseCode) + '/arrived', { method: 'POST' });
-      }
+      if (!state.demo) await recordArrival({ socket, fetch: win.fetch && win.fetch.bind(win), apiRoot: env.apiRoot, caseCode: state.activeCaseCode });
+      stopSharingPosition();
       caseBook.setStatus(state.activeCaseCode, 'ARRIVED');
       updateStatusChip({ status: 'ARRIVED', accepted_by: (caseBook.get(state.activeCaseCode) || {}).accepted_by });
       const banner = $('arrivedBanner');

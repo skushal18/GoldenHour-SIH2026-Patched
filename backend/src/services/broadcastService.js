@@ -9,6 +9,7 @@
      - audit hook on every state transition
    ========================================================================== */
 'use strict';
+const tracking = require('./trackingService');
 const hospitalsConfig = require('../config/hospitals');
 const { getStore } = require('../store');
 const { CASE_TYPES, labelFor, categoryFor } = require('../data/caseTypes');
@@ -68,6 +69,8 @@ function toDashboardCard(record, hospitalId) {
   const winner = record.accepted_hospital_id
     ? record.targets.find(t => t.hospital_id === record.accepted_hospital_id)
     : null;
+  const ownTrack = record.status === 'ACCEPTED' && Number(hospitalId) === Number(record.accepted_hospital_id);
+  const live = ownTrack ? tracking.snapshot(record.case_code) : {};
   const myCap = mine ? capacity.get(mine.hospital_id) : null;
   const score = mine ? match.scoreFor(record, mine, myCap) : null;
   const reasons = mine ? match.reasonsFor(record, mine, myCap) : [];
@@ -89,9 +92,12 @@ function toDashboardCard(record, hospitalId) {
     /* v5 additions */
     match_score: score, match_reasons: reasons,
     needs: match.needsFromCase(record),
-    last_position: record.last_position || null,
-    live_eta_minutes: record.live_eta_minutes || null,
-    eta_source: record.eta_source || 'crew',
+    last_position: live.last_position || null,
+    track: live.track || [],
+    tracking_hospital: ownTrack && winner ? { lat: winner.lat, lng: winner.lng } : null,
+    remaining_distance_km: live.distance_km == null ? null : live.distance_km,
+    live_eta_minutes: live.live_eta_minutes == null ? null : live.live_eta_minutes,
+    eta_source: live.eta_source || 'crew',
     patient_history: record.patient_history || [],
     capacity: myCap || null,
   };
@@ -118,8 +124,10 @@ function toAmbulanceStatus(record) {
     body.notes = record.notes || null;
     body.arrived_at = record.arrived_at || null;
     body.last_patient_updated_at = record.last_patient_updated_at || record.accepted_at || null;
-    body.live_eta_minutes = record.live_eta_minutes || null;
-    body.eta_source = record.eta_source || 'crew';
+    const live = record.status === 'ACCEPTED' ? tracking.snapshot(record.case_code) : {};
+    body.live_eta_minutes = live.live_eta_minutes == null ? null : live.live_eta_minutes;
+    body.eta_source = live.eta_source || 'crew';
+    body.position_at = live.last_position ? live.last_position.at : null;
   }
   return body;
 }
@@ -376,15 +384,15 @@ async function markArrived(caseCode, payload, io) {
 
   const result = await store.markArrived(caseCode);
   if (!result || !result.ok) return { ok:false, reason:(result && result.reason) || 'NOT_FOUND' };
+  if (result.already) return { ok:true, record:result.record, already:true };
 
   const t = require('./trackingService');
   const aggregate = t.drop(caseCode);
   audit.record(caseCode, 'ARRIVED', {
     hospital_id: hospitalId,
     seconds_accept_to_arrival: Math.round((Date.now() - new Date(record.accepted_at).getTime())/1000),
-    eta_error_minutes: (aggregate && aggregate.last_position && record.eta_minutes)
-      ? Math.abs((aggregate.last_position.speed_kmh||0)) : null,
-  }, { kind:'crew' });
+    eta_error_minutes: null,
+  }, payload && payload.actor === 'desk' ? { kind: 'desk', hospital_id: hospitalId } : { kind:'crew' });
 
   if (io) {
     io.to(`hospital_${result.record.accepted_hospital_id}`).emit('case:arrived', {

@@ -124,15 +124,17 @@ function socketHandler(io) {
         if (!winner) return respond(ack, false, 'NO_ACCEPTOR', 'No accepting hospital');
 
         const r = tracking.append(code, winner.lat, winner.lng, {
-          lat: Number(safe.lat), lng: Number(safe.lng),
+          lat: safe.lat, lng: safe.lng,
           accuracy_m: safe.accuracy_m == null ? null : Number(safe.accuracy_m),
           speed_kmh: safe.speed_kmh == null ? null : Number(safe.speed_kmh),
           source: safe.source || 'gps',
           at: safe.at || new Date().toISOString(),
         });
+        if (r.error) return respond(ack, false, r.error, 'Location fix is invalid, inaccurate or too old');
         if (r.throttled) return respond(ack, true, null, 'throttled');
+        const live = tracking.snapshot(code);
         Object.assign(record, { last_position: r.record.last_position,
-          live_eta_minutes: r.record.live_eta_minutes, eta_source: r.record.eta_source });
+          live_eta_minutes: live.live_eta_minutes, eta_source: r.record.eta_source });
         audit.record(code, 'POSITION', { lat: r.point.lat, lng: r.point.lng,
           live_eta: r.record.live_eta_minutes, eta_source: r.record.eta_source },
           { kind:'crew' });
@@ -142,9 +144,9 @@ function socketHandler(io) {
           case_code: code, lat: r.point.lat, lng: r.point.lng,
           accuracy_m: r.point.accuracy_m, speed_kmh: r.point.speed_kmh,
           source: r.point.source, at: r.point.at,
-          distance_km: winner.distance_km,
-          live_eta_minutes: r.record.live_eta_minutes,
-          eta_source: r.record.eta_source,
+          distance_km: live.distance_km,
+          live_eta_minutes: live.live_eta_minutes,
+          eta_source: live.eta_source,
         });
 
         /* The crew gets only what it does not already know: the derived ETA
@@ -154,9 +156,9 @@ function socketHandler(io) {
            into a way to track a vehicle. */
         io.to(`case_${code}`).emit('case:position', {
           case_code: code,
-          distance_km: winner.distance_km,
-          live_eta_minutes: r.record.live_eta_minutes,
-          eta_source: r.record.eta_source,
+          distance_km: live.distance_km,
+          live_eta_minutes: live.live_eta_minutes,
+          eta_source: live.eta_source,
           at: r.point.at,
         });
         respond(ack, true, null, 'ok');

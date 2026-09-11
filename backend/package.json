@@ -9,7 +9,7 @@
     "build:desk": "vite build --config desk/vite.config.js",
     "dev:desk": "vite --config desk/vite.config.js",
     "pretest": "npm run build:desk",
-    "test": "node tests/security.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/desk-auth.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/tracking.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js"
+    "test": "node tests/security.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/desk-auth.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/tracking.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js && node tests/desk-arrival-tracking.test.js"
   },
   "license": "MIT",
   "dependencies": {

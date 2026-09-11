@@ -54,6 +54,7 @@ function boot(options) {
 
   /* The Capacitor bridge is injected into the WebView before app.js runs. */
   if (opts.capacitor) {
+    w.androidBridge = {}; // Real Capacitor detects the native Android bridge.
     w.Capacitor = { isNativePlatform: function () { return true; }, Plugins: {} };
   }
 

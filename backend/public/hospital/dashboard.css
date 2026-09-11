@@ -874,3 +874,20 @@ body {
 @media (prefers-reduced-motion: reduce){
   .case, .overlay, .sheet{ animation: none !important; }
 }
+
+.arrival-toggle { display:flex; align-items:center; justify-content:center; gap:12px; min-height:56px; padding:12px; border:2px solid var(--accent-line); border-radius:var(--r-md); color:var(--accent-ink); background:var(--accent-wash); font-weight:700; }
+.switch-track { width:40px; height:24px; padding:3px; border-radius:99px; background:var(--muted); flex:none; }
+.switch-track::before { content:""; display:block; width:18px; height:18px; border-radius:50%; background:var(--surface); transition:transform .2s; }
+.arrival-toggle.is-on { background:var(--good-wash); color:var(--good-ink); border-color:var(--good-line); }
+.arrival-toggle.is-on .switch-track { background:var(--good-ink); }
+.arrival-toggle.is-on .switch-track::before { transform:translateX(16px); }
+.arrival-toggle[aria-busy="true"] { opacity:.65; cursor:wait; }
+.gps-trail { width:100%; height:180px; background:var(--surface); border-radius:var(--r-sm); border:1px solid var(--line); }
+.trail-grid { stroke:var(--divider); stroke-width:1; }
+.trail-line { fill:none; stroke:var(--brand-line); stroke-width:3; }
+.trail-ambulance { fill:var(--brand-fill); stroke:var(--ink); stroke-width:2; }
+.trail-hospital { fill:var(--accent-fill); stroke:var(--ink); stroke-width:2; }
+.trail-north { fill:var(--muted); font-size:11px; }
+.source-stale, .source-stationary { color:var(--caution-ink); background:var(--caution-wash); border:1px solid var(--caution-line); }
+.map-head { flex-wrap:wrap; gap:8px; }
+.map-eta { white-space:normal; font-size:var(--t-title); }

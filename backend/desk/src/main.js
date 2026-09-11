@@ -7,6 +7,7 @@
 'use strict';
 
 import './style.css';
+import { trackingView, trackSvg } from './tracking-view.js';
 import { ageBandLabel } from '../../../shared/age-bands.js';
 
 (function(){
@@ -51,6 +52,8 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
   });
 
   /* === state === */
+  const arrivalsInFlight = new Set();
+  const confirmedArrivals = new Set();
   const state = {
     identity: null,
     pending: [],
@@ -98,18 +101,21 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
     }
     await refreshQueue();
     startRealtime();
+    setInterval(refreshQueue, 10000);
   }
 
   /* === REST === */
   async function refreshQueue(){
     try{
       const r = await fetch(apiBase() + '/desk/queue' + (override ? '?hospital=' + override : ''));
+      if (!r.ok) throw new Error('Queue unavailable');
       const body = await r.json();
       state.pending = body.pending || [];
-      state.active  = body.active || [];
+      state.active = (body.active || []).filter(c => !confirmedArrivals.has(c.case_code))
+        .concat(state.active.filter(c => c.status === 'ARRIVED'));
       paintBoard();
       await paintNetworkSidebar();
-    }catch(e){ console.warn('refreshQueue', e); }
+    }catch(e){ console.warn('refreshQueue', e); paintBoard(); }
   }
 
   async function paintNetworkSidebar(){
@@ -142,7 +148,7 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
     if (!window.io) return;
     const sock = state.socket = window.io({ transports:['websocket','polling'],
       query: Object.assign({ role: 'hospital' }, override ? { hospital: String(override) } : {}) });
-    sock.on('connect', () => console.log('socket connected'));
+    sock.on('connect', () => refreshQueue());
     sock.on('hospital:identity', d => {
       state.identity = d;
       $('#hospitalName').textContent = d.hospital.name;
@@ -222,9 +228,14 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
   }
   function updatePosition(payload){
     const c = state.active.find(c => c.case_code === payload.case_code);
-    if (c){ c.last_position = payload; c.live_eta_minutes = payload.live_eta_minutes; c.eta_source = payload.eta_source; paintBoard(); }
+    if (c && c.status !== 'ARRIVED'){
+      c.track = (c.track || []).concat(payload).slice(-120);
+      c.last_position = payload; c.remaining_distance_km = payload.distance_km;
+      c.live_eta_minutes = payload.live_eta_minutes; c.eta_source = payload.eta_source; paintBoard();
+    }
   }
   function paintArrived(data){
+    confirmedArrivals.add(data.case_code);
     const c = state.active.find(c => c.case_code === data.case_code);
     if (!c) return;
     /* Reached-hospital can arrive twice — once from the button's own
@@ -334,9 +345,9 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
     return `<article class="case priority-${card.priority || 'GREEN'} ${card.status === 'ARRIVED' ? 'case-arrived' : ''}" data-case="${card.case_code}">
       <div class="case-head">
         <div class="case-title">
-          <span class="eyebrow">${escapeHtml((card.case_category || '').toUpperCase())} · en route</span>
+          <span class="eyebrow">${escapeHtml((card.case_category || '').toUpperCase())} · ${card.status === 'ARRIVED' ? 'arrived' : 'en route'}</span>
           <h3>${escapeHtml(card.chief_complaint || 'Case')}</h3>
-          <span class="sub">${escapeHtml(card.case_code)}${card.distance_km != null ? ' · '+card.distance_km.toFixed(1)+' km' : ''} · ETA ${renderEta(card)}</span>
+          <span class="sub">${escapeHtml(card.case_code)}${card.remaining_distance_km != null && card.status !== 'ARRIVED' ? ' · '+card.remaining_distance_km.toFixed(1)+' km straight-line' : ''} · ETA ${renderEta(card)}</span>
         </div>
         ${renderBadge(card.priority)}
       </div>
@@ -349,8 +360,8 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
       ${card.notes ? `<div class="note-block"><span class="eyebrow">Crew note</span><p>${escapeHtml(card.notes)}</p></div>` : ''}
       <div class="case-actions">
         ${card.status === 'ARRIVED'
-          ? `<span class="outcome-ribbon outcome-arrived">✓ Patient arrived · ${escapeHtml(formatTime(card.arrived_at))}</span>`
-          : `<button class="btn-accept" data-action="arrived" data-cc="${card.case_code}">Reached hospital</button>`}
+          ? `<button type="button" class="arrival-toggle is-on" role="switch" aria-checked="true" disabled><span class="switch-track" aria-hidden="true"></span>Arrived at hospital · ${escapeHtml(formatTime(card.arrived_at))}</button>`
+          : `<button type="button" class="arrival-toggle" role="switch" aria-checked="false" data-action="arrived" data-cc="${card.case_code}" ${arrivalsInFlight.has(card.case_code) ? 'disabled aria-busy="true"' : ''}><span class="switch-track" aria-hidden="true"></span>${arrivalsInFlight.has(card.case_code) ? 'Recording…' : 'Arrived at hospital'}</button><span class="map-readout">Confirm only after the patient reaches your hospital. This closes the case.</span>`}
         <button class="btn-secondary-desk" data-action="print" data-cc="${card.case_code}">Print handover</button>
         ${card.status === 'ARRIVED' ? '' : `<span class="outcome-ribbon outcome-won">✓ You accepted · ${acceptTime(card)}</span>`}
       </div>
@@ -358,7 +369,7 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
   }
 
   function renderBadge(p){ return `<span class="badge badge-${p || 'GREEN'}">${p || 'GREEN'} · ${({RED:'CRITICAL',AMBER:'URGENT',GREEN:'STABLE'})[p || 'GREEN']}</span>`; }
-  function renderEta(card){ return card.live_eta_minutes ? card.live_eta_minutes + ' min' : (card.eta_minutes ? card.eta_minutes+' min' : '—'); }
+  function renderEta(card){ return card.status === 'ARRIVED' ? 'Arrived' : trackingView(card).eta; }
   function acceptTime(card){ if (!card.accepted_at) return ''; const ms = new Date() - new Date(card.accepted_at); return Math.round(ms/1000)+'s ago'; }
   function renderCounts(target, msLeft){ /* kept simple */ }
   function renderCountdown(expires_at){
@@ -458,20 +469,17 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
   }
 
   function drawTrackPanel(card){
-    const live = typeof card.live_eta_minutes === 'number' && card.live_eta_minutes !== null;
-    /* The source label beside this already says LIVE / CREW ESTIMATE, so the
-       number does not have to repeat it. */
-    const etaText = card.live_eta_minutes ? `${card.live_eta_minutes} min`
-      : (card.eta_minutes ? `${card.eta_minutes} min` : '—');
-    const source = card.eta_source || 'crew';
+    if (card.status === 'ARRIVED') return '<div class="map-readout">Arrival confirmed · location sharing ended.</div>';
+    const view = trackingView(card);
+    const p = card.last_position;
+    const distance = Number.isFinite(card.remaining_distance_km) ? card.remaining_distance_km.toFixed(1) + ' km straight-line distance' : 'Distance unavailable';
+    const speed = p && Number.isFinite(p.speed_kmh) ? p.speed_kmh.toFixed(0) + ' km/h' : 'Speed unavailable';
     return `<div class="map-panel">
-      <div class="map-head">
-        <span class="map-eta">${etaText}</span>
-        <span class="map-source source-${source}">${({live:'LIVE',crew:'CREW ESTIMATE',stalled:'NOT MOVING'})[source] || source}</span>
-      </div>
-      <div class="map-readout">${card.last_position ? `${Number(card.last_position.speed_kmh||0).toFixed(0)} km/h · ${(card.distance_km||0).toFixed(1)} km away · updated ${formatTime(card.last_position.at)}` : 'Waiting for first GPS fix…'}</div>
-      <div class="map-placeholder" aria-hidden="true">${(card.last_position && card.last_position.lat != null) ? `${card.last_position.lat.toFixed(4)}, ${card.last_position.lng.toFixed(4)}` : 'No position received yet'}</div>
-      <div class="map-readout">Location is shared with this accepting hospital only — from acceptance until arrival.</div>
+      <div class="map-head"><span class="map-eta">${view.eta}</span><span class="map-source source-${view.source}">${view.label}</span></div>
+      <div class="map-readout">${view.valid ? `${speed} · ${distance} · updated ${escapeHtml(formatTime(p.at))}` : 'Waiting for first GPS fix…'}</div>
+      ${trackSvg(card)}
+      <div class="map-readout">${view.stale && view.valid ? 'Last known position only. Live updates have stopped.' : 'GPS-based estimate; traffic and road routing are not included.'}</div>
+      <div class="map-readout">Location is shared with this accepting hospital only, until arrival.</div>
     </div>`;
   }
   function formatTime(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleTimeString(); }
@@ -605,23 +613,26 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
     document.querySelectorAll('[data-action="arrived"]').forEach(btn => btn.addEventListener('click', () => {
       const code = btn.dataset.cc;
       const card = state.active.find(c => c.case_code === code);
-      if (!card) return;
+      if (!card || arrivalsInFlight.has(code)) return;
       if (card.status === 'ARRIVED') { toast('Arrival is already recorded'); return; }
       /* Arrival closes the case for everybody, so it asks once. */
       if (!confirm('Record that ' + code + ' has reached this hospital?\n\nThis closes the case.')) return;
 
+      arrivalsInFlight.add(code);
       btn.disabled = true;
       const previous = btn.textContent;
+      const controller = new AbortController();
+      const arrivalTimeout = setTimeout(() => controller.abort(), 8000);
       btn.textContent = 'Recording…';
-      fetch(apiBase() + '/requests/' + encodeURIComponent(code) + '/arrived', {
-        method: 'POST',
+      fetch(apiBase() + '/desk/arrived/' + encodeURIComponent(code) + (override ? '?hospital=' + override : ''), {
+        method: 'POST', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hospital_id: myHospitalId() }),
       })
         .then(r => r.json().then(body => ({ ok: r.ok, body })))
         .then(({ ok, body }) => {
-          if (!ok && body && body.reason !== 'NOT_FOUND' && !body.already) {
-            toast(body.message || 'Arrival was refused');
+          if (!ok || !body || body.success !== true || body.status !== 'ARRIVED') {
+            toast((body && body.message) || 'Arrival was refused');
             btn.disabled = false; btn.textContent = previous;
             return;
           }
@@ -633,7 +644,7 @@ import { ageBandLabel } from '../../../shared/age-bands.js';
         .catch(() => {
           toast('Could not reach the server — arrival not recorded');
           btn.disabled = false; btn.textContent = previous;
-        });
+        }).finally(() => { clearTimeout(arrivalTimeout); arrivalsInFlight.delete(code); paintBoard(); });
     }));
   }
 

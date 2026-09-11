@@ -1,0 +1,28 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const readModule = p => import('data:text/javascript;base64,'+fs.readFileSync(path.join(__dirname,p)).toString('base64'));
+(async()=>{
+ const {recordArrival}=await readModule('../src/modules/arrival.js');
+ const opts={apiRoot:'https://test.invalid/api/v1',caseCode:'GH-TEST',timeoutMs:5};
+ for(const status of [404,409,500]) await assert.rejects(recordArrival({...opts,fetch:async()=>({ok:false,json:async()=>({success:false})})}));
+ await assert.rejects(recordArrival({...opts,socket:{connected:true,emit:(e,p,ack)=>ack({success:false})}}));
+ const good=async()=>({ok:true,json:async()=>({success:true,status:'ARRIVED'})});
+ assert.equal((await recordArrival({...opts,socket:{connected:true,emit:()=>{}},fetch:good})).status,'ARRIVED');
+ assert.equal((await recordArrival({...opts,socket:{connected:true,emit:(e,p,ack)=>ack({success:true})}})).success,true);
+ const {watchPosition}=await readModule('../src/modules/position-watch.js');
+ let resolveWatch, cleared=[], updates=0;
+ const plugin={requestPermissions:async()=>({location:'granted'}),watchPosition:()=>new Promise(r=>resolveWatch=r),clearWatch:async({id})=>cleared.push(id)};
+ const stop=watchPosition({native:true,plugin,onPosition:()=>updates++,onError:e=>{throw e;}});
+ await new Promise(r=>setTimeout(r,0));stop();resolveWatch('native-123');await new Promise(r=>setTimeout(r,0));
+ assert.deepEqual(cleared,['native-123']);
+ let callback;const stopBrowser=watchPosition({native:false,geolocation:{watchPosition:f=>{callback=f;return 42;},clearWatch:id=>cleared.push(id)},onPosition:()=>updates++,onError:e=>{throw e;}});
+ callback({});stopBrowser();callback({});assert.equal(updates,1);assert.equal(cleared[1],42);
+ const {trackingView,trackSvg}=await readModule('../../backend/desk/src/tracking-view.js');
+ const card={last_position:{lat:12,lng:77,at:new Date().toISOString()},live_eta_minutes:3,eta_minutes:8,eta_source:'live',tracking_hospital:{lat:12.01,lng:77.01}};
+ assert.equal(trackingView(card).eta,'3 min (GPS estimate)');
+ assert.equal(trackingView(card,Date.now()+31000).source,'stale');
+ assert.equal(trackingView(card,Date.now()+31000).eta,'8 min (crew estimate)');
+ assert.ok(trackSvg(card).includes('trail-hospital'));assert.ok(!trackSvg(card).includes('NaN'));
+ console.log('PASS: arrival failure/timeout handling, native and browser watch cancellation, stale ETA and local GPS trail');
+})().catch(e=>{console.error(e);process.exitCode=1;});

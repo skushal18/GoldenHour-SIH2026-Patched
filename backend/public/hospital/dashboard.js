@@ -15,6 +15,45 @@ var __objRest = (source, exclude) => {
 };
 (function() {
   "use strict";
+  function trackingView(card, now = Date.now()) {
+    const p = card.last_position;
+    const valid = p && p.lat != null && p.lng != null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng));
+    const age = valid ? now - Date.parse(p.at) : Infinity;
+    const stale = !Number.isFinite(age) || age > 3e4 || age < -3e4;
+    const source = stale && valid ? "stale" : card.eta_source || "crew";
+    const live = valid && !stale && source === "live" && Number.isFinite(card.live_eta_minutes);
+    const crew = Number.isFinite(card.eta_minutes) ? card.eta_minutes + " min (crew estimate)" : "ETA unavailable";
+    return {
+      valid,
+      source,
+      stale,
+      eta: live ? card.live_eta_minutes + " min (GPS estimate)" : crew,
+      label: { live: "GPS ESTIMATE", crew: "WAITING FOR GPS ETA", stationary: "LOW SPEED · ETA UNCERTAIN", stalled: "NOT MOVING · ETA UNCERTAIN", stale: "LOCATION STALE" }[source] || "WAITING FOR GPS ETA"
+    };
+  }
+  function trackSvg(card) {
+    const valid = (p) => p && p.lat != null && p.lng != null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng));
+    const track = (card.track || []).filter(valid).slice(-120);
+    if (valid(card.last_position) && (!track.length || track[track.length - 1].at !== card.last_position.at)) track.push(card.last_position);
+    if (!track.length) return '<div class="map-placeholder">Waiting for ambulance GPS…</div>';
+    const hospital = valid(card.tracking_hospital) ? card.tracking_hospital : null;
+    const all = hospital ? track.concat(hospital) : track;
+    const midLat = Number(track[track.length - 1].lat) * Math.PI / 180;
+    const xs = all.map((p) => Number(p.lng) * Math.cos(midLat)), ys = all.map((p) => -Number(p.lat));
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const scale = Math.max((Math.max(...xs) - Math.min(...xs)) / 260, (Math.max(...ys) - Math.min(...ys)) / 130, 2e-6);
+    const xy = (p) => [150 + (Number(p.lng) * Math.cos(midLat) - cx) / scale, 85 + (-Number(p.lat) - cy) / scale];
+    const points = track.map((p) => xy(p).map((n) => n.toFixed(2)).join(",")).join(" ");
+    const [x, y] = xy(track[track.length - 1]);
+    const h = hospital ? xy(hospital) : null;
+    return `<svg class="gps-trail" viewBox="0 0 300 170" role="img" aria-label="Recent ambulance GPS trail; cyan ambulance and orange hospital. North is up. This is not a road map.">
+    <path d="M0 42H300M0 85H300M0 128H300M75 0V170M150 0V170M225 0V170" class="trail-grid"/>
+    <polyline points="${points}" class="trail-line"/>
+    ${h ? `<rect x="${h[0] - 7}" y="${h[1] - 7}" width="14" height="14" rx="3" class="trail-hospital"/>` : ""}
+    <circle cx="${x}" cy="${y}" r="7" class="trail-ambulance"/>
+    <text x="280" y="16" class="trail-north">N ↑</text>
+  </svg><div class="map-readout">● Ambulance · ■ Hospital · GPS trail, not a road map</div>`;
+  }
   const AGE_BANDS = [
     { id: "baby", label: "Baby", hint: "0 – 3", value: 1, min: 0, max: 3 },
     { id: "child", label: "Child", hint: "3 – 17", value: 8, min: 3, max: 18 },
@@ -77,6 +116,8 @@ var __objRest = (source, exclude) => {
       } catch (_) {
       }
     });
+    const arrivalsInFlight = /* @__PURE__ */ new Set();
+    const confirmedArrivals = /* @__PURE__ */ new Set();
     const state = {
       identity: null,
       pending: [],
@@ -123,17 +164,20 @@ var __objRest = (source, exclude) => {
       }
       await refreshQueue();
       startRealtime();
+      setInterval(refreshQueue, 1e4);
     }
     async function refreshQueue() {
       try {
         const r = await fetch(apiBase() + "/desk/queue" + (override ? "?hospital=" + override : ""));
+        if (!r.ok) throw new Error("Queue unavailable");
         const body = await r.json();
         state.pending = body.pending || [];
-        state.active = body.active || [];
+        state.active = (body.active || []).filter((c) => !confirmedArrivals.has(c.case_code)).concat(state.active.filter((c) => c.status === "ARRIVED"));
         paintBoard();
         await paintNetworkSidebar();
       } catch (e) {
         console.warn("refreshQueue", e);
+        paintBoard();
       }
     }
     async function paintNetworkSidebar() {
@@ -160,7 +204,7 @@ var __objRest = (source, exclude) => {
         transports: ["websocket", "polling"],
         query: Object.assign({ role: "hospital" }, override ? { hospital: String(override) } : {})
       });
-      sock.on("connect", () => console.log("socket connected"));
+      sock.on("connect", () => refreshQueue());
       sock.on("hospital:identity", (d) => {
         state.identity = d;
         $("#hospitalName").textContent = d.hospital.name;
@@ -247,14 +291,17 @@ var __objRest = (source, exclude) => {
     }
     function updatePosition(payload) {
       const c = state.active.find((c2) => c2.case_code === payload.case_code);
-      if (c) {
+      if (c && c.status !== "ARRIVED") {
+        c.track = (c.track || []).concat(payload).slice(-120);
         c.last_position = payload;
+        c.remaining_distance_km = payload.distance_km;
         c.live_eta_minutes = payload.live_eta_minutes;
         c.eta_source = payload.eta_source;
         paintBoard();
       }
     }
     function paintArrived(data) {
+      confirmedArrivals.add(data.case_code);
       const c = state.active.find((c2) => c2.case_code === data.case_code);
       if (!c) return;
       if (c.status === "ARRIVED") return;
@@ -337,9 +384,9 @@ var __objRest = (source, exclude) => {
       return `<article class="case priority-${card.priority || "GREEN"} ${card.status === "ARRIVED" ? "case-arrived" : ""}" data-case="${card.case_code}">
       <div class="case-head">
         <div class="case-title">
-          <span class="eyebrow">${escapeHtml((card.case_category || "").toUpperCase())} · en route</span>
+          <span class="eyebrow">${escapeHtml((card.case_category || "").toUpperCase())} · ${card.status === "ARRIVED" ? "arrived" : "en route"}</span>
           <h3>${escapeHtml(card.chief_complaint || "Case")}</h3>
-          <span class="sub">${escapeHtml(card.case_code)}${card.distance_km != null ? " · " + card.distance_km.toFixed(1) + " km" : ""} · ETA ${renderEta(card)}</span>
+          <span class="sub">${escapeHtml(card.case_code)}${card.remaining_distance_km != null && card.status !== "ARRIVED" ? " · " + card.remaining_distance_km.toFixed(1) + " km straight-line" : ""} · ETA ${renderEta(card)}</span>
         </div>
         ${renderBadge(card.priority)}
       </div>
@@ -351,7 +398,7 @@ var __objRest = (source, exclude) => {
       ${renderShots(card)}
       ${card.notes ? `<div class="note-block"><span class="eyebrow">Crew note</span><p>${escapeHtml(card.notes)}</p></div>` : ""}
       <div class="case-actions">
-        ${card.status === "ARRIVED" ? `<span class="outcome-ribbon outcome-arrived">✓ Patient arrived · ${escapeHtml(formatTime(card.arrived_at))}</span>` : `<button class="btn-accept" data-action="arrived" data-cc="${card.case_code}">Reached hospital</button>`}
+        ${card.status === "ARRIVED" ? `<button type="button" class="arrival-toggle is-on" role="switch" aria-checked="true" disabled><span class="switch-track" aria-hidden="true"></span>Arrived at hospital · ${escapeHtml(formatTime(card.arrived_at))}</button>` : `<button type="button" class="arrival-toggle" role="switch" aria-checked="false" data-action="arrived" data-cc="${card.case_code}" ${arrivalsInFlight.has(card.case_code) ? 'disabled aria-busy="true"' : ""}><span class="switch-track" aria-hidden="true"></span>${arrivalsInFlight.has(card.case_code) ? "Recording…" : "Arrived at hospital"}</button><span class="map-readout">Confirm only after the patient reaches your hospital. This closes the case.</span>`}
         <button class="btn-secondary-desk" data-action="print" data-cc="${card.case_code}">Print handover</button>
         ${card.status === "ARRIVED" ? "" : `<span class="outcome-ribbon outcome-won">✓ You accepted · ${acceptTime(card)}</span>`}
       </div>
@@ -361,7 +408,7 @@ var __objRest = (source, exclude) => {
       return `<span class="badge badge-${p || "GREEN"}">${p || "GREEN"} · ${{ RED: "CRITICAL", AMBER: "URGENT", GREEN: "STABLE" }[p || "GREEN"]}</span>`;
     }
     function renderEta(card) {
-      return card.live_eta_minutes ? card.live_eta_minutes + " min" : card.eta_minutes ? card.eta_minutes + " min" : "—";
+      return card.status === "ARRIVED" ? "Arrived" : trackingView(card).eta;
     }
     function acceptTime(card) {
       if (!card.accepted_at) return "";
@@ -450,17 +497,17 @@ var __objRest = (source, exclude) => {
       </button>`).join("")}</div>`;
     }
     function drawTrackPanel(card) {
-      typeof card.live_eta_minutes === "number" && card.live_eta_minutes !== null;
-      const etaText = card.live_eta_minutes ? `${card.live_eta_minutes} min` : card.eta_minutes ? `${card.eta_minutes} min` : "—";
-      const source = card.eta_source || "crew";
+      if (card.status === "ARRIVED") return '<div class="map-readout">Arrival confirmed · location sharing ended.</div>';
+      const view = trackingView(card);
+      const p = card.last_position;
+      const distance = Number.isFinite(card.remaining_distance_km) ? card.remaining_distance_km.toFixed(1) + " km straight-line distance" : "Distance unavailable";
+      const speed = p && Number.isFinite(p.speed_kmh) ? p.speed_kmh.toFixed(0) + " km/h" : "Speed unavailable";
       return `<div class="map-panel">
-      <div class="map-head">
-        <span class="map-eta">${etaText}</span>
-        <span class="map-source source-${source}">${{ live: "LIVE", crew: "CREW ESTIMATE", stalled: "NOT MOVING" }[source] || source}</span>
-      </div>
-      <div class="map-readout">${card.last_position ? `${Number(card.last_position.speed_kmh || 0).toFixed(0)} km/h · ${(card.distance_km || 0).toFixed(1)} km away · updated ${formatTime(card.last_position.at)}` : "Waiting for first GPS fix…"}</div>
-      <div class="map-placeholder" aria-hidden="true">${card.last_position && card.last_position.lat != null ? `${card.last_position.lat.toFixed(4)}, ${card.last_position.lng.toFixed(4)}` : "No position received yet"}</div>
-      <div class="map-readout">Location is shared with this accepting hospital only — from acceptance until arrival.</div>
+      <div class="map-head"><span class="map-eta">${view.eta}</span><span class="map-source source-${view.source}">${view.label}</span></div>
+      <div class="map-readout">${view.valid ? `${speed} · ${distance} · updated ${escapeHtml(formatTime(p.at))}` : "Waiting for first GPS fix…"}</div>
+      ${trackSvg(card)}
+      <div class="map-readout">${view.stale && view.valid ? "Last known position only. Live updates have stopped." : "GPS-based estimate; traffic and road routing are not included."}</div>
+      <div class="map-readout">Location is shared with this accepting hospital only, until arrival.</div>
     </div>`;
     }
     function formatTime(iso) {
@@ -589,22 +636,26 @@ var __objRest = (source, exclude) => {
       document.querySelectorAll('[data-action="arrived"]').forEach((btn) => btn.addEventListener("click", () => {
         const code = btn.dataset.cc;
         const card = state.active.find((c) => c.case_code === code);
-        if (!card) return;
+        if (!card || arrivalsInFlight.has(code)) return;
         if (card.status === "ARRIVED") {
           toast("Arrival is already recorded");
           return;
         }
         if (!confirm("Record that " + code + " has reached this hospital?\n\nThis closes the case.")) return;
+        arrivalsInFlight.add(code);
         btn.disabled = true;
         const previous = btn.textContent;
+        const controller = new AbortController();
+        const arrivalTimeout = setTimeout(() => controller.abort(), 8e3);
         btn.textContent = "Recording…";
-        fetch(apiBase() + "/requests/" + encodeURIComponent(code) + "/arrived", {
+        fetch(apiBase() + "/desk/arrived/" + encodeURIComponent(code) + (override ? "?hospital=" + override : ""), {
           method: "POST",
+          signal: controller.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ hospital_id: myHospitalId() })
         }).then((r) => r.json().then((body) => ({ ok: r.ok, body }))).then(({ ok, body }) => {
-          if (!ok && body && body.reason !== "NOT_FOUND" && !body.already) {
-            toast(body.message || "Arrival was refused");
+          if (!ok || !body || body.success !== true || body.status !== "ARRIVED") {
+            toast(body && body.message || "Arrival was refused");
             btn.disabled = false;
             btn.textContent = previous;
             return;
@@ -615,6 +666,10 @@ var __objRest = (source, exclude) => {
           toast("Could not reach the server — arrival not recorded");
           btn.disabled = false;
           btn.textContent = previous;
+        }).finally(() => {
+          clearTimeout(arrivalTimeout);
+          arrivalsInFlight.delete(code);
+          paintBoard();
         });
       }));
     }

@@ -1129,3 +1129,6 @@ button:disabled:active{ transform: none; }
 .hero { border-top: 3px solid var(--brand-fill); }
 .brand-name em { color: var(--accent-ink); }
 .tab.is-on { box-shadow: inset 0 2px 0 var(--brand-line); }
+
+.tracking-line { flex-wrap:wrap; }
+#trackingText { flex:1; min-width:180px; }

@@ -29,21 +29,27 @@ const cases = new Map();
 function ensure(code){ if (!cases.has(code)) cases.set(code, { track: [] }); return cases.get(code); }
 
 function append(caseCode, hospitalLat, hospitalLng, pos){
-  const rec = ensure(caseCode);
   const now = Date.now();
+  if (!pos || !validCoordinate(pos.lat, 90) || !validCoordinate(pos.lng, 180)) return { error: 'INVALID_COORD' };
+  const at = pos.at == null ? now : Date.parse(pos.at);
+  if (!Number.isFinite(at) || at > now + 30000 || now - at > 120000) return { error: 'STALE_POSITION' };
+  if (pos.accuracy_m != null && (!Number.isFinite(Number(pos.accuracy_m)) || Number(pos.accuracy_m) < 0 || Number(pos.accuracy_m) > 200)) return { error: 'INACCURATE_POSITION' };
+  const rec = ensure(caseCode);
   if (rec.lastUpdateMs && (now - rec.lastUpdateMs) < MIN_INTERVAL_MS) return { throttled: true };
+  if (rec.last_position && at <= Date.parse(rec.last_position.at)) return { error: 'OUT_OF_ORDER' };
   const point = {
     lat: Number(pos.lat),
     lng: Number(pos.lng),
     accuracy_m: pos.accuracy_m == null ? null : Number(pos.accuracy_m),
     speed_kmh: pos.speed_kmh == null ? null : Number(pos.speed_kmh),
     source: pos.source || 'gps',
-    at: pos.at || new Date(now).toISOString(),
+    at: new Date(at).toISOString(),
   };
   rec.track.push(point);
   while (rec.track.length > MAX_POINTS) rec.track.shift();
   rec.last_position = point;
   rec.lastUpdateMs = now;
+  rec.distance_km = haversine(point.lat, point.lng, hospitalLat, hospitalLng);
   rec.live_eta_minutes = computeEta(rec.track, hospitalLat, hospitalLng);
   rec.eta_source = classify(rec.track, rec.live_eta_minutes);
   return { throttled: false, record: rec, point };
@@ -121,10 +127,25 @@ function classify(track, etaMin){
      breakdown, a re-route. The whole clinical value of tracking is that the
      ER learns this before the patient is late rather than after. */
   if (speed < STALL_KMH){
-    const span = spanSeconds(track.slice(-4));
+    const span = spanSeconds(track.slice(-Math.ceil(STALL_SECONDS / 5) - 2));
     if (span !== null && span >= STALL_SECONDS) return 'stalled';
   }
-  return etaMin != null ? 'live' : 'crew';
+  return speed < STALL_KMH ? 'stationary' : (etaMin != null ? 'live' : 'crew');
+}
+
+function validCoordinate(value, limit){
+  return (typeof value === 'number' || typeof value === 'string') && String(value).trim() !== '' && Number.isFinite(Number(value)) && Math.abs(Number(value)) <= limit;
+}
+
+// Read-time freshness is essential: a disconnected ambulance emits no event.
+function snapshot(caseCode, now = Date.now()){
+  const rec = cases.get(caseCode);
+  if (!rec || !rec.last_position) return { last_position: null, track: [], live_eta_minutes: null, eta_source: 'crew', distance_km: null };
+  const stale = now - Date.parse(rec.last_position.at) > 30000;
+  const etaUsable = !stale && rec.eta_source === 'live';
+  return { last_position: rec.last_position, track: rec.track.slice(),
+    live_eta_minutes: etaUsable ? rec.live_eta_minutes : null,
+    eta_source: stale ? 'stale' : rec.eta_source, distance_km: rec.distance_km };
 }
 
 function get(caseCode){
@@ -142,4 +163,4 @@ function drop(caseCode){
   return aggregate;
 }
 
-module.exports = { append, get, drop, recentSpeedKmh, computeEta, classify, spanSeconds };
+module.exports = { snapshot, haversine, append, get, drop, recentSpeedKmh, computeEta, classify, spanSeconds };

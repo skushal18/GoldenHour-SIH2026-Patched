@@ -7,7 +7,7 @@ const router = express.Router();
 const hospitalsConfig = require('../config/hospitals');
 const { deskGuard, deskAuthMode } = require('../middleware/hospitalIdentity');
 const { getStore } = require('../store');
-const { acceptBroadcast, declineBroadcast, toDashboardCard } = require('../services/broadcastService');
+const { acceptBroadcast, declineBroadcast, markArrived, toDashboardCard } = require('../services/broadcastService');
 const capacity = require('../services/capacityService');
 const tracking = require('../services/trackingService');
 const audit = require('../services/auditService');
@@ -20,6 +20,15 @@ router.get('/me', (req, res) => {
     hackathon_mode: hospitalsConfig.HACKATHON_MODE,
     accept_window_seconds: hospitalsConfig.ACCEPT_WINDOW_SECONDS,
     auth_mode: deskAuthMode(), capacity: c });
+});
+
+// Identity comes from deskGuard, never the submitted hospital_id.
+router.post('/arrived/:caseCode', async (req, res, next) => {
+  try {
+    const result = await markArrived(req.params.caseCode, { hospital_id: req.hospital.hospital_id, actor: 'desk' }, req.app.get('io'));
+    if (!result.ok) return res.status(result.reason === 'NOT_FOUND' ? 404 : result.reason === 'WRONG_HOSPITAL' ? 403 : 409).json({ success: false, reason: result.reason, message: result.message || 'Arrival could not be recorded' });
+    res.json({ success: true, already: !!result.already, status: result.record.status, case_code: result.record.case_code, arrived_at: result.record.arrived_at });
+  } catch (err) { next(err); }
 });
 
 router.get('/laptops', (req, res) => {
@@ -82,10 +91,11 @@ router.get('/track/:caseCode', async (req, res) => {
     if (!record) return res.status(404).json({ success:false });
     if (Number(record.accepted_hospital_id) !== Number(req.hospital.hospital_id))
       return res.status(403).json({ success:false, message:'Case is not yours' });
-    const t = tracking.get(req.params.caseCode) || {};
+    const t = record.status === 'ACCEPTED' ? tracking.snapshot(req.params.caseCode) : {};
     const winner = record.targets.find(x => x.hospital_id === record.accepted_hospital_id);
     res.json({ case_code: req.params.caseCode, track: t.track || [],
-      last_position: t.last_position || record.last_position || null,
+      last_position: t.last_position || null,
+      remaining_distance_km: t.distance_km == null ? null : t.distance_km,
       live_eta_minutes: t.live_eta_minutes || null, eta_source: t.eta_source || 'crew',
       hospital: winner ? { lat: winner.lat, lng: winner.lng, name: winner.name, distance_km: winner.distance_km } : null });
   }catch(e){ res.status(500).json({ success:false }); }

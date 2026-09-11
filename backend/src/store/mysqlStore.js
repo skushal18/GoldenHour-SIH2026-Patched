@@ -12,10 +12,11 @@ function createMysqlStore(pool) {
   function hydrate(row, targetRows){
     const snapshot = parseJson(row.payload, {});
     return {
+      ...snapshot,
       case_code: row.case_code, case_id: row.legacy_case_id||null, status: row.status,
       priority: row.priority, created_at: toIso(row.created_at), expires_at: toIso(row.expires_at),
       accepted_hospital_id: row.accepted_hospital_id||null, accepted_at: toIso(row.accepted_at),
-      arrived_at: toIso(row.arrived_at), ...snapshot,
+      arrived_at: toIso(row.arrived_at),
       targets: (targetRows||[]).map(t => ({
         hospital_id:t.hospital_id, name:t.hospital_name, contact:t.hospital_contact,
         lat: t.hospital_lat==null?null:Number(t.hospital_lat),
