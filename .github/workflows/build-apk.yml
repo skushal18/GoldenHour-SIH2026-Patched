@@ -88,14 +88,22 @@ jobs:
             const base = process.env.SERVER_BASE.replace(/\/+\$/, '');
             if (!/^https?:\/\//.test(base)) { console.error('server_base must start with http:// or https://'); process.exit(1); }
             const src = fs.readFileSync(file, 'utf8');
-            const out = src.replace(/SERVER_BASE:\s*\"[^\"]*\"/, 'SERVER_BASE: \"' + base + '\"');
-            if (out === src) { console.error('Could not find SERVER_BASE in ' + file); process.exit(1); }
+            // Anchored to the two-space-indented setting inside window.GH_CONFIG.
+            // An unanchored match hits the example in the header comment instead.
+            const re = /^  SERVER_BASE:\s*\"[^\"]*\"/m;
+            if (!re.test(src)) { console.error('Could not find SERVER_BASE in ' + file); process.exit(1); }
+            const out = src.replace(re, '  SERVER_BASE: \"' + base + '\"');
             fs.writeFileSync(file, out);
             console.log('SERVER_BASE = ' + base);
           "
 
+      # A config.js that is not valid JavaScript never defines window.GH_CONFIG,
+      # so the app falls back to a blank SERVER_BASE and ships in demo mode
+      # without saying so. That has happened; fail the build instead.
       - name: Show the server this APK will talk to
-        run: grep -n 'SERVER_BASE:' app/www/config.js
+        run: |
+          node --check app/www/config.js
+          grep -n 'SERVER_BASE:' app/www/config.js
 
       # The android/ project is committed, so this is a copy-and-sync rather
       # than a scaffold. `cap add android` is here only as a safety net for a
