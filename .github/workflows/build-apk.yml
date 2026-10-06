@@ -52,10 +52,10 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: |
-            build-tools;35.0.0
-            platforms;android-35
-            cmdline-tools;latest
+            packages: |
+                build-tools;34.0.0
+                platforms;android-34
+                cmdline-tools;latest
 
       # `npm ci` installs @capacitor/cli into app/node_modules/.bin, so the
       # `cap` used below is this project's pinned version. Nothing here depends
