@@ -65,7 +65,7 @@
         list.innerHTML = hs.length ? hs.map(function (h) {
           return '<button type="button" role="option" data-hid="' + h.hospital_id + '">' +
             (h.has_login ? '<span class="tag">has a login</span>' : '') + esc(h.name) +
-            '<span class="sub">' + esc([h.district, h.state, h.pincode].filter(Boolean).join(' · ')) + ' · ' + (h.coord_source === 'listed' ? 'location listed' : h.coord_source === 'pincode' ? 'location approx. (pincode)' : 'no location') + '</span></button>';
+            '<span class="sub">' + esc([h.district, h.state, h.pincode].filter(Boolean).join(' · ')) + ' · ' + (h.coord_source === 'listed' ? 'location listed' : h.coord_source === 'pincode' ? 'location approx. (pincode)' : h.coord_source === 'district' ? 'location approx. (district centre)' : 'no location') + '</span></button>';
         }).join('') : '<button type="button" disabled>No hospital matches “' + esc(q) + '”</button>';
         list.hidden = false;
         list._data = hs;
@@ -110,7 +110,7 @@
       if (!q && !st) { $('#dirRows').innerHTML = '<tr><td colspan="5" class="table-empty">Search by name, district or pincode, or pick a state.</td></tr>'; return; }
       GH.api('/admin/directory?limit=100&q=' + encodeURIComponent(q) + '&state=' + encodeURIComponent(st)).then(function (b) {
         var rows = (b.hospitals || []).map(function (h) {
-          var loc = h.coord_source === 'listed' ? 'Listed' : h.coord_source === 'pincode' ? '≈ Pincode ' + esc(h.pincode || '') : 'Unknown';
+          var loc = h.coord_source === 'listed' ? 'Listed' : h.coord_source === 'pincode' ? '≈ Pincode ' + esc(h.pincode || '') : h.coord_source === 'district' ? '≈ District centre' : 'Unknown';
           return '<tr><td><div style="font-weight:500">' + esc(h.name) + '</div><div class="sub">' + esc([h.district, h.state].filter(Boolean).join(' · ')) + '</div></td>' +
             '<td>' + esc([h.ownership, h.care_type].filter(Boolean).join(' · ') || '—') + (h.emergency_likely ? '' : '<div class="sub">probably not an emergency unit</div>') + '</td>' +
             '<td>' + loc + '</td><td>' + esc(h.contact || '—') + '</td>' +
@@ -148,6 +148,7 @@
         '<div class="kv"><span>Hospitals in directory</span><b>' + n(s.records) + '</b></div>' +
         '<div class="kv"><span>Location as listed</span><b>' + n(s.location_listed) + '</b></div>' +
         '<div class="kv"><span>Location from pincode (approx.)</span><b>' + n(s.location_pincode) + '</b></div>' +
+        '<div class="kv"><span>Location from district centre (approx.)</span><b>' + n(s.location_district) + '</b></div>' +
         '<div class="kv"><span>Likely emergency-capable</span><b>' + n(s.emergency_likely) + '</b></div>' +
         '<div class="kv"><span>States and UTs</span><b>' + n(s.states) + '</b></div>' +
         '<div class="kv"><span>With an active GoldenHour login</span><b>' + n(s.hospitals_with_login) + '</b></div>';

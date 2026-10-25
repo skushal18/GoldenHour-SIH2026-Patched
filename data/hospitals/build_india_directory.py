@@ -75,7 +75,7 @@ with open(nhd_path, encoding='utf-8', errors='replace') as f:
         pincode = pincode if len(pincode) == 6 else ''
         addr = clean(r['Address_Original_First_Line']) or clean(r['Location'])
 
-        lat = lng = None; src = None
+        lat = lng = None; src = None; disputed = None
         raw = clean(r['Location_Coordinates'])
         m = re.findall(r'-?\d+\.\d+', raw)
         if len(m) >= 2:
@@ -85,8 +85,10 @@ with open(nhd_path, encoding='utf-8', errors='replace') as f:
         pc = pin_centroid.get(pincode)
         if lat is not None:
             if pc and hav(lat, lng, pc[0], pc[1]) > 60:
-                # The listed point is far from its own pincode: trust the pincode.
-                lat, lng = pc; src = 'pincode'; stats['gps_disagreed_used_pincode'] += 1
+                # The listed point is far from its own pincode. One of them is
+                # wrong; the district check below decides which (keep both).
+                disputed = (lat, lng)
+                lat, lng = pc; src = 'pincode'; stats['listed_vs_pincode_disputed'] += 1
             else:
                 src = 'listed'; stats['coords_listed'] += 1
         elif pc:
@@ -120,9 +122,45 @@ with open(nhd_path, encoding='utf-8', errors='replace') as f:
             'lat': round(lat, 6) if lat is not None else None,
             'lng': round(lng, 6) if lng is not None else None,
             'coord_source': src,
+            '_disputed': disputed,
         }
         seen[key] = rec
         out.append(rec)
+
+# ── District sanity check ───────────────────────────────────────────────────
+# India Post's office coordinates are wrong for some PIN codes (Old Airport
+# Road, Bengaluru, 560017, sits ~50 km south of the city in that data). Each
+# district gets a reference point — the median of its hospitals' listed
+# coordinates, else of its PIN-code centres — and a PIN-code placement more
+# than DISTRICT_KM from it is replaced by the district reference and marked
+# coord_source = 'district' (coarser, and labelled so in the UI).
+DISTRICT_KM = 35
+ref_pts = collections.defaultdict(list)
+for rec in out:
+    if rec['coord_source'] == 'listed':
+        ref_pts[(rec['state'], rec['district'])].append((rec['lat'], rec['lng']))
+pin_pts = collections.defaultdict(list)
+for rec in out:
+    if rec['coord_source'] == 'pincode':
+        pin_pts[(rec['state'], rec['district'])].append((rec['lat'], rec['lng']))
+def district_ref(key):
+    pts = ref_pts.get(key) if len(ref_pts.get(key, [])) >= 3 else pin_pts.get(key)
+    if not pts or len(pts) < 3: return None
+    return (round(statistics.median(x[0] for x in pts), 6), round(statistics.median(x[1] for x in pts), 6))
+refs = {}
+for rec in out:
+    if rec['coord_source'] != 'pincode': continue
+    key = (rec['state'], rec['district'])
+    if key not in refs: refs[key] = district_ref(key)
+    ref = refs[key]
+    if not ref: continue
+    d_pin = hav(rec['lat'], rec['lng'], ref[0], ref[1])
+    lst = rec.get('_disputed')
+    if lst and hav(lst[0], lst[1], ref[0], ref[1]) <= DISTRICT_KM and hav(lst[0], lst[1], ref[0], ref[1]) < d_pin:
+        # The listed point agrees with its district; the pincode did not.
+        rec['lat'], rec['lng'] = round(lst[0], 6), round(lst[1], 6); rec['coord_source'] = 'listed'; stats['disputed_resolved_listed'] += 1
+    elif d_pin > DISTRICT_KM:
+        rec['lat'], rec['lng'] = ref; rec['coord_source'] = 'district'; stats['pincode_far_from_district_used_district'] += 1
 
 # ── Bengaluru curated list: enrich matches, add the rest ────────────────────
 blr = json.load(open(blr_path, encoding='utf-8'))
@@ -144,13 +182,20 @@ for h in blr:
         x['curated'] = True
         continue
     pc = pin_centroid.get(pin)
+    if pc:
+        ref = refs.get(('Karnataka', 'Bengaluru Urban')) or district_ref(('Karnataka', 'Bengaluru Urban'))
+        if ref and hav(pc[0], pc[1], ref[0], ref[1]) > DISTRICT_KM: pc = None
+    src = 'pincode' if pc else None
+    if not pc:
+        pc = refs.get(('Karnataka', 'Bengaluru Urban')) or district_ref(('Karnataka', 'Bengaluru Urban'))
+        src = 'district' if pc else None
     out.append({
         'source_id': 'BLR-' + str(h.get('id', '')), 'name': nm, 'state': 'Karnataka', 'district': 'Bengaluru Urban',
         'pincode': pin, 'address': (h.get('Address') or '')[:200], 'phone': h.get('Phone') or '',
         'ownership': h.get('Type') or '', 'care_type': 'Hospital', 'system': 'Allopathic',
         'specialties': h.get('Category') or '', 'beds': None, 'emergency_likely': True,
         'lat': pc[0] if pc else None, 'lng': pc[1] if pc else None,
-        'coord_source': 'pincode' if pc else None, 'curated': True,
+        'coord_source': src, 'curated': True,
     })
     added += 1
 stats['bangalore_enriched'] = enriched; stats['bangalore_added'] = added
@@ -179,6 +224,7 @@ summary = {
     'with_location': sum(1 for r in out if r['lat'] is not None),
     'location_listed': sum(1 for r in out if r['coord_source'] == 'listed'),
     'location_pincode': sum(1 for r in out if r['coord_source'] == 'pincode'),
+    'location_district': sum(1 for r in out if r['coord_source'] == 'district'),
     'emergency_likely': sum(1 for r in out if r['emergency_likely']),
     'states': len(set(r['state'] for r in out)),
     'by_state': dict(collections.Counter(r['state'] for r in out).most_common()),

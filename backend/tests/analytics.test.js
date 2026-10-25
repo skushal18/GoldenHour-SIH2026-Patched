@@ -12,6 +12,7 @@ process.env.PORT = process.env.TEST_PORT_AN || '5104';
 process.env.DB_DRIVER = 'memory';
 process.env.DESK_AUTH = 'ip';
 process.env.DEMO_SEED = 'false';
+process.env.ACCOUNT_SEED_FILE = '/nonexistent/no-seed.json';   // isolate from backend/seed
 process.env.HACKATHON_MODE = 'false';     // real radius matching between the two demo laptops
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 

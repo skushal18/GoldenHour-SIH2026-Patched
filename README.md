@@ -21,7 +21,7 @@ npm run setup                       # backend + app dependencies
 npm run demo                        # in-memory server on :5000
 ```
 
-The demo prints sign-ins once (an `admin` login and two Bengaluru hospital logins). Then open:
+Logins in `backend/seed/accounts.json` (bcrypt hashes only; the passwords were given to the project owner) are created at startup: `admin` plus ER desks for St John's, Bowring, Victoria and Manipal (Old Airport Road). Without that file, the demo prints fresh sign-ins once. Then open:
 
 | URL | What |
 |---|---|
@@ -73,7 +73,7 @@ Runs the colour-contrast check, the ambulance app suites (including a jsdom test
 
 ## Limits
 
-- Directory data is the Government's 2017-era list, refreshed in 2025 metadata; 20,180 locations are pincode centres (marked ≈ in the UI) and can be kilometres out. Verify a hospital before onboarding it.
+- Directory data is the Government's 2017-era list; 17,125 locations are PIN-code centres and 2,857 district centres (both marked ≈ in the UI) and can be kilometres out. Verify a hospital before onboarding it.
 - Not clinically validated. Triage colours are decision support, not diagnosis.
 - Tracking needs the app open in the foreground; one backend process (GPS trails are in memory).
 - OpenStreetMap's public tiles suit a demo; use a tile provider with an agreement for real use.

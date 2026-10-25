@@ -4,7 +4,8 @@
    distance/ETA, stale detection, MySQL projection and tracking shutdown. */
 const assert = require('assert');
 process.env.PORT = '5117'; process.env.DB_DRIVER = 'memory'; process.env.DESK_AUTH = 'jwt';
-process.env.DEMO_SEED = 'false'; process.env.BCRYPT_ROUNDS = '4'; process.argv.push('--memory');
+process.env.DEMO_SEED = 'false';
+process.env.ACCOUNT_SEED_FILE = '/nonexistent/no-seed.json';   // isolate from backend/seed process.env.BCRYPT_ROUNDS = '4'; process.argv.push('--memory');
 const { server } = require('../src/server');
 const { io } = require('socket.io-client');
 const tracking = require('../src/services/trackingService');

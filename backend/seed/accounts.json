@@ -1,0 +1,40 @@
+{
+  "note": "Logins created at startup if they do not exist yet. Only bcrypt hashes are stored here; the passwords were given to the project owner. Change them from the admin console (Reset password) or delete this file to stop seeding.",
+  "accounts": [
+    {
+      "username": "admin",
+      "role": "SUPER_ADMIN",
+      "hospital_id": null,
+      "password_hash": "$2a$11$wQmO5T8MwVNoX2G9Z3hpSucdlTF9jiT/WC5GnrNl9ZcNWopClS3iS",
+      "label": "GoldenHour administrator"
+    },
+    {
+      "username": "er.stjohns",
+      "role": "HOSPITAL_STAFF",
+      "hospital_id": 12179,
+      "password_hash": "$2a$11$EhMnfOejh0TmEmLqYRH7wO2kgBTEE0GMKlBhFxP2agWeUmmFVCzNm",
+      "label": "St John's Medical College Hospital"
+    },
+    {
+      "username": "er.bowring",
+      "role": "HOSPITAL_STAFF",
+      "hospital_id": 12815,
+      "password_hash": "$2a$11$v1UjLC8U/9dJGc/z4vZq0uOizCVhvMeZGbvQ5rDNFvdbVhgAeDyiy",
+      "label": "Bowring and Lady Curzon Hospital"
+    },
+    {
+      "username": "er.victoria",
+      "role": "HOSPITAL_STAFF",
+      "hospital_id": 11880,
+      "password_hash": "$2a$11$ACfkliQQaO8u/wNGtvbZw.6Gy.pq6h9WtprBNs3dtx3EL.H2/1a5C",
+      "label": "Victoria Hospital"
+    },
+    {
+      "username": "er.manipal",
+      "role": "HOSPITAL_STAFF",
+      "hospital_id": 100093,
+      "password_hash": "$2a$11$UigidVWg.Bnio3kf8w.oieymS981U1UZVmZKKQ8MVGj9VdmxdwA3m",
+      "label": "Manipal Hospital, Old Airport Road"
+    }
+  ]
+}

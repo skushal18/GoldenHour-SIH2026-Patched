@@ -254,11 +254,39 @@ async function listAccounts({ q, state } = {}) {
  *   Bengaluru hospitals, with random passwords printed once in the log —
  *   unless DEMO_SEED=false. DEMO_PASSWORD fixes them for a rehearsed demo.
  */
+/* backend/seed/accounts.json: logins the project owner was handed, stored
+   here as bcrypt hashes only. Each is created at startup if its username does
+   not exist yet (so they also return after a restart on the in-memory store)
+   and is never overwritten — a password changed or reset from the admin
+   console stays changed while the database keeps it. */
+const SEED_FILE = process.env.ACCOUNT_SEED_FILE || require('path').join(__dirname, '..', '..', 'seed', 'accounts.json');
+
+async function seedFromFile(logger) {
+  let data;
+  try { data = JSON.parse(require('fs').readFileSync(SEED_FILE, 'utf8')); }
+  catch (err) { if (err.code !== 'ENOENT') logger.warn('⚠️  account seed file unreadable: ' + err.message); return 0; }
+  let created = 0;
+  for (const a of (data && data.accounts) || []) {
+    const username = normaliseUsername(a.username);
+    if (!USERNAME_RE.test(username) || ROLES.indexOf(a.role) === -1 || !/^\$2[aby]\$\d\d\$/.test(String(a.password_hash || ''))) {
+      logger.warn('⚠️  skipped invalid seed account: ' + a.username); continue;
+    }
+    if (a.role === 'HOSPITAL_STAFF' && !directory.get(a.hospital_id)) { logger.warn('⚠️  seed account ' + username + ': hospital ' + a.hospital_id + ' not in the directory'); continue; }
+    if (await getAccounts().findByUsername(username)) continue;
+    await getAccounts().create({ username, password_hash: a.password_hash, role: a.role,
+      hospital_id: a.role === 'HOSPITAL_STAFF' ? Number(a.hospital_id) : null, must_change_password: false, created_by: 'seed-file' });
+    created++;
+  }
+  if (created) logger.log('👤 created ' + created + ' login' + (created === 1 ? '' : 's') + ' from seed/accounts.json');
+  return created;
+}
+
 async function bootstrap(log) {
   const logger = log || console;
   const accounts = getAccounts();
   const prod = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
   const printed = [];
+  await seedFromFile(logger);
 
   if ((await accounts.countByRole('SUPER_ADMIN')) === 0) {
     const envUser = normaliseUsername(process.env.SUPER_ADMIN_USERNAME || '');

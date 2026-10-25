@@ -1,8 +1,9 @@
 {
   "records": 29844,
-  "with_location": 29493,
-  "location_listed": 9313,
-  "location_pincode": 20180,
+  "with_location": 29544,
+  "location_listed": 9562,
+  "location_pincode": 17125,
+  "location_district": 2857,
   "emergency_likely": 21435,
   "states": 36,
   "by_state": {
@@ -47,9 +48,11 @@
     "rows": 30273,
     "coords_listed": 9453,
     "coords_pincode": 19248,
-    "gps_disagreed_used_pincode": 1219,
+    "listed_vs_pincode_disputed": 1219,
     "duplicates": 507,
     "no_location": 353,
+    "disputed_resolved_listed": 249,
+    "pincode_far_from_district_used_district": 2803,
     "bangalore_enriched": 15,
     "bangalore_added": 78
   }

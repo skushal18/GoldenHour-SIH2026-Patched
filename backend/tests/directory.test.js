@@ -20,7 +20,7 @@ const n = directory.load();
 const s = directory.summary();
 ok('the national file loads (tens of thousands of hospitals)', () => assert.ok(n > 25000, 'loaded ' + n));
 ok('every state and UT is present', () => assert.ok(s.states >= 35, s.states + ' states'));
-ok('location grades add up', () => assert.strictEqual(s.location_listed + s.location_pincode + s.no_location, s.records));
+ok('location grades add up', () => assert.strictEqual(s.location_listed + s.location_pincode + s.location_district + s.no_location, s.records));
 ok('ids are the stable government serial numbers', () => {
   const sj = directory.get(12179);
   assert.ok(sj && /St John/i.test(sj.name), 'id 12179 should be St John\'s Medical College Hospital');

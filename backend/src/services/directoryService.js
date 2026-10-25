@@ -15,6 +15,8 @@
      coord_source = 'listed'  — the directory's own coordinates
      coord_source = 'pincode' — the centre of the hospital's PIN code, which
                                 can be several kilometres out
+     coord_source = 'district' — the centre of its district, where the PIN
+                                code's location was implausible
    ========================================================================== */
 'use strict';
 
@@ -176,14 +178,15 @@ function states() {
 
 function summary() {
   ensureLoaded();
-  let listed = 0, pincode = 0, none = 0, emergency = 0;
+  let listed = 0, pincode = 0, district = 0, none = 0, emergency = 0;
   for (const h of all) {
     if (h.coord_source === 'listed') listed++;
     else if (h.coord_source === 'pincode') pincode++;
+    else if (h.coord_source === 'district') district++;
     else none++;
     if (h.emergency_likely) emergency++;
   }
-  return { records: all.length, location_listed: listed, location_pincode: pincode, no_location: none,
+  return { records: all.length, location_listed: listed, location_pincode: pincode, location_district: district, no_location: none,
     emergency_likely: emergency, states: states().length, file: loadedFrom ? path.basename(loadedFrom) : null };
 }
 

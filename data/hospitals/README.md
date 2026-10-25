@@ -51,9 +51,10 @@ ambulances to hospitals and by the admin console to create hospital logins.
 | | Count |
 |---|---:|
 | Hospitals | 29,844 |
-| Location as listed in the source | 9,313 |
-| Location from the hospital's PIN code (approximate) | 20,180 |
-| No usable location | 351 |
+| Location as listed in the source | 9,562 |
+| Location from the hospital's PIN code (approximate) | 17,125 |
+| Location from the district centre (PIN code implausible) | 2,857 |
+| No usable location | 300 |
 | Likely emergency-capable (heuristic) | 21,435 |
 
 **Sources**
@@ -78,7 +79,12 @@ python3 data/hospitals/build_india_directory.py \
   point more than 60 km from its own PIN code's centre is replaced by the centre.
 - Missing coordinates are filled from the PIN-code centre (the median of its post
   offices) and marked `coord_source = pincode`.
-- Exact duplicates (same name and PIN code) are merged: 502.
+- India Post coordinates are wrong for some PIN codes, so every PIN-code
+  placement is checked against its district (the median of the district's
+  listed hospitals): more than 35 km away → the district centre is used and
+  marked `coord_source = district`. When a listed point and its PIN code
+  disagree by over 60 km, whichever agrees with the district wins.
+- Exact duplicates (same name and PIN code) are merged: 507.
 - Personal contact fields (nodal officer names, emails, registration scans) are
   **not** copied.
 - `id` is the government serial number (`Sr_No`), so it never changes on a
