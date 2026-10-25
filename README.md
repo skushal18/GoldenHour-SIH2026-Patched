@@ -1,393 +1,81 @@
 # GoldenHour — SIH 2026
 
-> **Emergency Ambulance-to-Hospital Pre-Arrival Coordination Platform**
+> **Emergency ambulance-to-hospital pre-arrival coordination**
 
-GoldenHour is a real-time emergency coordination system that connects ambulance crews with hospital emergency departments before a patient reaches the hospital.
+An ambulance crew broadcasts a case once. Hospitals on GoldenHour see it on their ER desk; the first to accept takes the patient; the crew and that hospital then share updates, GPS and arrival. GoldenHour is a hackathon engineering prototype, not a certified clinical product.
 
-## Final Status
+## What's new in v6
 
-- **Railway cloud deployment:** Complete
-- **Cloud backend:** Running
-- **Hospital ER dashboard:** Complete
-- **Ambulance application:** Complete
-- **Android/Capacitor application:** Complete
-- **Realtime Socket.IO communication:** Implemented
-- **MySQL production persistence:** Supported
-- **Patient updates during transit:** Implemented
-- **Live tracking / ETA:** Implemented
-- **Hospital capacity:** Implemented
-- **Reached Hospital / case closure:** Implemented
-- **Automated test inventory:** 412 documented checks
-- **GitHub Actions APK build:** Implemented
+- **Central hospital sign-in.** One server, one account database. Each hospital has its own username and password, and signing in opens that hospital's ER desk only — its identity comes from the login, never from the URL, a header or the IP address.
+- **Super-admin console** (`/admin`). Pick a hospital from the national directory, create its login (a temporary password shown once), reset passwords, disable or enable logins, browse the directory, watch live cases, read the audit log.
+- **All-India hospital directory.** 29,844 hospitals from the Government of India's [National Hospital Directory](https://www.data.gov.in/resource/national-hospital-directory-geo-code-and-additional-parameters-updated-till-last-month) (data.gov.in, GODL-India), plus the curated Bengaluru list. See [`data/hospitals/README.md`](data/hospitals/README.md).
+- **Redesigned ER board** — minimal cyan + orange frosted glass, a live street map (Leaflet + OpenStreetMap) for en-route ambulances, delay alerts from the crew, nearby hospitals, capacity strip. Sign-in and admin use a calm clinical light theme.
+- **Call ahead.** When no GoldenHour hospital is in range (or nobody accepts), the crew sees the nearest directory hospitals with phone numbers.
+- **Crew tokens.** Each broadcast returns a secret token; reading, editing, tracking, delaying, cancelling and closing a case all need it, because case codes are sequential.
+- **Fixes** — the app's offline case list now matches the server's (they had drifted: "Eclampsia" arrived as "Heat stroke"); delay reports now reach the desk; `DB_PORT` and Railway's `MYSQL_URL` are honoured; the server creates its own tables and never drops any; capacity and the audit trail persist in MySQL; hospital-scope analytics are really hospital-scoped; capacity updates no longer switch diversion off; rate limits can't be dodged with a forged header.
 
----
+## Run it
 
-## What GoldenHour Does
-
-```text
-Ambulance
-   ↓
-Enter emergency + patient information
-   ↓
-Capture location and clinical information
-   ↓
-Broadcast to nearby hospitals
-   ↓
-Hospitals receive the case
-   ↓
-First eligible hospital accepts
-   ↓
-Ambulance receives acceptance
-   ↓
-Hospital follows the case during transit
-   ↓
-Patient information can be updated
-   ↓
-Ambulance reaches hospital
-   ↓
-Hospital records arrival
-   ↓
-Case closes
+```bash
+npm run setup                       # backend + app dependencies
+npm run demo                        # in-memory server on :5000
 ```
 
----
+The demo prints sign-ins once (an `admin` login and two Bengaluru hospital logins). Then open:
 
-## Final Cloud Architecture
+| URL | What |
+|---|---|
+| `http://localhost:5000/hospital` | ER desk — sign in with a hospital login |
+| `http://localhost:5000/admin` | Administration — sign in with the admin login |
+| `http://localhost:5000/ambulance` | Ambulance app in a browser |
+| `http://localhost:5000/health` | Server status |
 
-```text
-┌──────────────────────┐
-│   Ambulance App      │
-│   Web / Android APK  │
-└──────────┬───────────┘
-           │ HTTPS
-           │ Socket.IO
-           ▼
-┌──────────────────────┐
-│   Railway Cloud      │
-│ Express + Socket.IO  │
-└──────────┬───────────┘
-           │
-     ┌─────┴─────┐
-     ▼           ▼
-  MySQL      Hospital
- Database    ER Dashboard
-```
+Set `DEMO_PASSWORD` to fix the demo passwords for a rehearsed demo.
 
-The final deployment is cloud-based. The production workflow does **not** depend on a local LAN server or a laptop IP.
+## Deploy (Railway)
 
----
+The repository root deploys as one service (`railway.toml`). Add Railway's MySQL plugin and reference its `MYSQL_URL` — the server creates its tables on first start. Set:
 
-## Ambulance Application
+| Variable | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `DB_DRIVER` | `mysql` |
+| `JWT_SECRET` | 48 random bytes, base64url |
+| `CORS_ORIGIN` | `https://localhost` (the Android APK) plus any other browser origin |
+| `HACKATHON_MODE` | `false` (or leave unset in a non-production demo) |
+| `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_PASSWORD` | the first administrator; change the password at first sign-in, then remove these |
 
-The completed ambulance interface includes:
+Production refuses to start on an unsafe configuration and says what to fix. All variables: [`backend/.env.example`](backend/.env.example).
 
-- Home
-- New Alert
-- Cases
-- Settings
-- Recent Activity
-- Active Case
-- Patient editing
-- Vital signs
-- Location handling
-- Hospital acceptance
-- ETA / transit status
-- Delay reporting
-- Navigation
-- Calling the hospital
-- Reached Hospital
-- Case closure
-- Offline/outbox handling
-- Photo attachment
-
-### Patient information
-
-- Baby
-- Child
-- Adult
-- Senior Citizen
-- Unknown
-- Sex
-- Blood group
-- Consciousness
-- Blood pressure
-- Heart rate
-- Respiratory rate
-- SpO₂
-- Glucose
-- Notes
-
----
-
-## Hospital ER Dashboard
-
-The completed dashboard includes:
-
-- Incoming cases
-- Active cases
-- Hospital capacity
-- Resuscitation bays
-- Ventilators
-- CT
-- Operating theatre
-- Blood
-- Cath lab
-- Diversion status
-- Network status
-- Case priority
-- Critical flags
-- Patient information
-- Vital signs
-- Resource requirements
-- Ambulance tracking
-- ETA state
-- Arrival confirmation
-- Handover information
-
----
-
-## Realtime Case Acceptance
-
-The system guarantees that the first valid hospital acceptance wins.
+## How it fits together
 
 ```text
-Hospital A ──┐
-             ├──→ Atomic acceptance → Winning hospital
-Hospital B ──┘
+Ambulance app (web / Android APK)
+   │  POST /api/v1/requests  → case code + crew token
+   ▼
+Express + Socket.IO (one Node process)
+   ├─ hospital directory (29,844, in memory, radius index)
+   ├─ accounts · cases · capacity · audit  (MySQL, or memory for demos)
+   └─ alerts every hospital WITH A LOGIN inside the crew's radius
+   ▼
+ER desks (each signed in as its own hospital) — first to accept wins
 ```
 
-The other hospital is cleared/notified so two hospitals do not simultaneously claim the same case.
+API overview — ambulance: `GET /case-types`, `POST /requests`, `GET /requests/:code`, `POST /requests/:code/cancel`, `POST /requests/:code/arrived` (the last three need `X-Crew-Token`). Sign-in: `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password`, `POST /auth/logout`. Desk (signed in): `/desk/me`, `/desk/queue`, `/desk/history`, `/desk/accept/:code`, `/desk/decline/:code`, `/desk/arrived/:code`, `/desk/capacity`, `/desk/nearby`, `/desk/track/:code`, `/desk/handover/:code`, `/desk/timeline/:code`, `/desk/analytics`. Admin: `/admin/accounts…`, `/admin/directory…`, `/admin/live`, `/admin/audit`. All under `/api/v1`.
 
----
+## Tests
 
-## Clinical Prioritisation
-
-Triage is handled server-side.
-
-The system can surface critical conditions such as:
-
-- Shock
-- Hypoxia
-- Low GCS
-- Cardiac arrest
-- Airway compromise
-
-The priority is derived by the backend rather than being supplied as a client-controlled value.
-
----
-
-## Tracking
-
-After acceptance, the accepting hospital can receive ambulance location updates at controlled intervals.
-
-The system derives:
-
-- Distance
-- ETA
-- Recent movement
-- Stalled state
-- Location freshness
-
-The interface explicitly communicates uncertainty such as:
-
-- `LIVE`
-- `CREW ESTIMATE`
-- `NOT MOVING`
-- `LOCATION STALE`
-- `ETA UNAVAILABLE`
-
----
-
-## Patient Updates
-
-Patient details can be edited during transit.
-
-The case code does not change when patient information is updated.
-
-This allows the receiving hospital to react to deterioration or newly available information before arrival.
-
----
-
-## Arrival Lifecycle
-
-```text
-PENDING
-  ↓
-ACCEPTED
-  ↓
-EN ROUTE
-  ↓
-ARRIVED
-  ↓
-CLOSED
+```bash
+npm test
 ```
 
-The ambulance application provides **Reached hospital**.
+Runs the colour-contrast check, the ambulance app suites (including a jsdom test of the ER desk) and 14 backend suites (sign-in, directory, broadcast race, crew tokens, patient edits, arrival, tracking, capacity, analytics, idempotency, production config gate).
 
-The hospital dashboard provides an arrival confirmation and closes the case after confirmation.
+## Limits
 
----
-
-## Cloud Deployment
-
-GoldenHour is deployed on **Railway**.
-
-Production communication:
-
-```text
-Android / Web
-     ↓
-Internet
-     ↓
-Railway
-     ↓
-Backend
-     ↓
-MySQL
-     ↓
-Hospital dashboard
-```
-
-No local LAN server is required for the final cloud deployment.
-
----
-
-## Android APK
-
-The ambulance client is packaged using Capacitor.
-
-APK builds are handled through GitHub Actions.
-
-The workflow can inject the production backend base URL during the build, allowing the generated APK to communicate with the Railway deployment.
-
----
-
-## Security
-
-The project includes:
-
-- Input validation
-- Security headers
-- Content Security Policy
-- Rate limiting
-- No-store API responses
-- CORS restrictions
-- Secure production configuration
-- Authentication infrastructure
-- Error IDs
-- Production safety checks
-
-Production mode is designed to reject unsafe configuration defaults.
-
----
-
-## Accessibility
-
-The shared design system includes:
-
-- 76 documented contrast checks
-- 4.5:1 minimum target for normal text
-- 3:1 target for borders/graphics
-- 44 px minimum interactive targets
-- Larger primary actions
-- Safe-area support
-- Reduced-motion support
-- Acrylic fallback
-- Non-colour-only state communication
-
----
-
-## Testing
-
-The final project documentation records **412 checks**:
-
-| Area | Checks |
-|---|---:|
-| Design contrast | 76 |
-| Ambulance app | 205 |
-| Backend | 131 |
-| **Total** | **412** |
-
-The test coverage includes configuration, location, functional behaviour, security, realtime broadcast, patient editing, arrival lifecycle, tracking, capacity, matching, audit, analytics and idempotency.
-
----
-
-## Repository Structure
-
-```text
-GoldenHour-SIH2026-Patched/
-├── app/
-│   ├── src/
-│   ├── www/
-│   ├── android/
-│   └── tests/
-├── backend/
-│   ├── src/
-│   ├── desk/
-│   ├── public/
-│   │   ├── hospital/
-│   │   └── landing/
-│   ├── database/
-│   └── tests/
-├── shared/
-├── config/
-├── data/
-├── docs/
-├── package.json
-└── README.md
-```
-
----
-
-## API Overview
-
-### Ambulance
-
-- `GET /api/v1/case-types`
-- `POST /api/v1/requests`
-- `GET /api/v1/requests/:caseCode`
-- `POST /api/v1/requests/:caseCode/cancel`
-- `POST /api/v1/requests/:caseCode/arrived`
-
-### Hospital desk
-
-- `GET /api/v1/desk/me`
-- `GET /api/v1/desk/queue`
-- `GET /api/v1/desk/history`
-- `POST /api/v1/desk/accept/:caseCode`
-- `POST /api/v1/desk/decline/:caseCode`
-- `GET /api/v1/desk/capacity`
-- `PUT /api/v1/desk/capacity`
-- `GET /api/v1/desk/track/:caseCode`
-- `GET /api/v1/desk/handover/:caseCode`
-- `GET /api/v1/desk/timeline/:caseCode`
-- `GET /api/v1/desk/analytics`
-
-### System
-
-- `GET /health`
-
----
-
-## Important Limitations
-
-The project should be presented as a serious SIH/hackathon engineering prototype, not as a clinically certified hospital product.
-
-Future production work may include:
-
-- Hospital HIS/EMR integration
-- Formal clinical validation
-- External road-routing
-- Background location
-- Large-scale hospital onboarding
-- Long-term analytics
-- High-availability/disaster recovery
-- Regulatory and clinical safety review
-
----
-
-## Project Principle
+- Directory data is the Government's 2017-era list, refreshed in 2025 metadata; 20,180 locations are pincode centres (marked ≈ in the UI) and can be kilometres out. Verify a hospital before onboarding it.
+- Not clinically validated. Triage colours are decision support, not diagnosis.
+- Tracking needs the app open in the foreground; one backend process (GPS trails are in memory).
+- OpenStreetMap's public tiles suit a demo; use a tile provider with an agreement for real use.
 
 > **Give the hospital the right information before the patient arrives.**
-
-GoldenHour focuses on reducing the communication gap between ambulance crews and emergency departments so that the receiving hospital can prepare earlier and respond with better information.

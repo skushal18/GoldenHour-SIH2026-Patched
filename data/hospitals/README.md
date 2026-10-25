@@ -40,3 +40,53 @@ Curated list of hospitals in Bengaluru for seeding GoldenHour's hospital directo
 
 September 2026, via web research (government hospital directories, BBMP referral hospital
 records, and area-wise private hospital listings for Bengaluru).
+
+---
+
+## All-India directory (v6) — `india_hospitals.csv`
+
+**29,844 hospitals across 36 states and UTs**, used by the backend to match
+ambulances to hospitals and by the admin console to create hospital logins.
+
+| | Count |
+|---|---:|
+| Hospitals | 29,844 |
+| Location as listed in the source | 9,313 |
+| Location from the hospital's PIN code (approximate) | 20,180 |
+| No usable location | 351 |
+| Likely emergency-capable (heuristic) | 21,435 |
+
+**Sources**
+
+- [National Hospital Directory with Geo Code](https://www.data.gov.in/resource/national-hospital-directory-geo-code-and-additional-parameters-updated-till-last-month),
+  Ministry of Health and Family Welfare / NIHFW, data.gov.in, Government Open
+  Data Licence – India. 30,273 rows; the file used has SHA-256
+  `1ddcad9f9b922142a4374c7b89b70fb6cefd8a257448c70a61e1c07d98845134`.
+- India Post pincode directory (Department of Posts, open government data) for
+  PIN-code centres, via the `IndiaPIN` package's `pincode.csv`.
+- `bangalore_hospitals.json` above: 15 matched and enriched, 78 added.
+
+**How it is built** — `build_india_directory.py` (Python 3, standard library):
+
+```bash
+python3 data/hospitals/build_india_directory.py \
+  hospital_directory.csv pincode.csv data/hospitals/bangalore_hospitals.json data/hospitals
+```
+
+- Placeholder `0` / `NA` values become blank; escaped newlines are removed.
+- Coordinates outside India are dropped (swapped lat/lng are repaired). A listed
+  point more than 60 km from its own PIN code's centre is replaced by the centre.
+- Missing coordinates are filled from the PIN-code centre (the median of its post
+  offices) and marked `coord_source = pincode`.
+- Exact duplicates (same name and PIN code) are merged: 502.
+- Personal contact fields (nodal officer names, emails, registration scans) are
+  **not** copied.
+- `id` is the government serial number (`Sr_No`), so it never changes on a
+  rebuild — hospital logins point at it. Curated additions use 100000+.
+- `emergency_likely` is a name/type heuristic (hospital, medical college, CHC,
+  trauma…; not eye/dental/clinic/AYUSH-only). It is a hint for ordering, not a
+  verified capability.
+
+**Limits** — the source dates from 2017 with later metadata updates; hospitals
+open, close and move. PIN-code locations can be several kilometres out (the UI
+marks them ≈). Verify a hospital before giving it a login.
