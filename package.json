@@ -1,6 +1,6 @@
 {
   "name": "goldenhour",
-  "version": "5.1.0",
+  "version": "6.0.0",
   "private": true,
   "license": "MIT",
   "description": "Pre-arrival emergency coordination between ambulance crews and hospital emergency departments.",
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "setup": "npm --prefix backend install && npm --prefix app install",
-    "build": "npm --prefix app run build && npm --prefix backend run build:desk",
+    "build": "npm --prefix app run build",
     "start": "npm --prefix backend start",
     "dev": "npm --prefix backend run dev",
     "demo": "npm --prefix backend run demo",

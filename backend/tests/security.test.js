@@ -54,12 +54,14 @@ group('Development keeps its conveniences');
 check('a bare demo configuration starts, with warnings', () => {
   const r = audit({});
   assert.strictEqual(r.fatal.length, 0, 'should never be fatal outside production: ' + fatalText(r));
-  assert.ok(r.warnings.length >= 2, 'expected warnings about DESK_AUTH and CORS');
+  assert.ok(r.warnings.length >= 2, 'expected warnings about the JWT secret and CORS');
 });
 
-check('desk auth defaults to ip in development and jwt in production', () => {
-  assert.strictEqual(audit({}).deskAuth, 'ip');
+check('every desk signs in by default; IP identity only when asked for by name', () => {
+  assert.strictEqual(audit({}).deskAuth, 'jwt');
   assert.strictEqual(audit({ NODE_ENV: 'production' }).deskAuth, 'jwt');
+  assert.strictEqual(audit({ DESK_AUTH: 'ip' }).deskAuth, 'ip');
+  assert.strictEqual(audit({ DESK_AUTH: 'something-else' }).deskAuth, 'jwt');
 });
 
 check('a weak secret under DESK_AUTH=jwt is a warning, not a refusal', () => {

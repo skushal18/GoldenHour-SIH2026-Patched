@@ -24,7 +24,7 @@ on:
         type: choice
         options: [debug, release]
   push:
-    branches: [main, master]
+    branches: [main, master, Patch-2, 'v6-*']
     paths:
       - 'app/**'
       - 'shared/**'

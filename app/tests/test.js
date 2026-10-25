@@ -234,6 +234,18 @@ check("at least one STROKE case type exists (drives the FAST panel)", function (
   assert.ok(app.DEMO_CASE_TYPES.some(function (c) { return c.category === "STROKE"; }));
 });
 
+check("the offline case list is identical to the server's (same ids, labels, categories)", function () {
+  /* A case travels by id. If the bundled list and the server's ever differ,
+     the crew picks one emergency and the hospital reads another. */
+  var server = require("../../backend/src/data/caseTypes.js").CASE_TYPES;
+  var strip = function (list) { return list.map(function (c) { return { id: c.id, category: c.category, label: c.label, quick: !!c.quick, short: c.short || null }; }); };
+  assert.deepStrictEqual(strip(app.DEMO_CASE_TYPES), strip(server));
+});
+check("every case category has a dropdown group", function () {
+  var groups = app.CATEGORY_LABELS.map(function (g) { return g[0]; });
+  app.DEMO_CASE_TYPES.forEach(function (c) { assert.ok(groups.indexOf(c.category) !== -1, "no group for " + c.category); });
+});
+
 /* ── Result ────────────────────────────────────────────────── */
 
 console.log("\n" + (failed === 0 ? "PASS" : "FAIL") + " — " + passed + " passed, " + failed + " failed");

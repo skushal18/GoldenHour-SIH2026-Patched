@@ -475,6 +475,12 @@
       <span class="accepted-meta" id="acceptedMeta">—</span>
     </div>
 
+    <div class="call-ahead" id="callAheadBox" hidden>
+      <b class="call-ahead-title" id="callAheadTitle">Hospitals nearby to call</b>
+      <span class="call-ahead-note">Not on GoldenHour, so they did not get this case. Phone ahead before you go.</span>
+      <div id="callAheadList"></div>
+    </div>
+
     <p class="sheet-note" id="sheetNote">You can close this and keep working. The case stays on the Home screen.</p>
     <button type="button" class="btn-primary" id="newRequestBtn">Start new request</button>
   </div>
@@ -535,6 +541,31 @@
       </button>
     </div>
     <button type="button" class="btn-ghost" data-close="photoSheet">Cancel</button>
+  </div>
+</div>
+
+<div class="overlay" id="delayOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="delayTitle">
+  <div class="sheet">
+    <button type="button" class="sheet-x" data-close="delayOverlay" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+    <h2 id="delayTitle">Report a delay</h2>
+    <p class="sheet-sub">The receiving hospital sees this on its board straight away.</p>
+    <div class="delay-reasons" id="delayReasons" role="radiogroup" aria-label="Reason">
+      <button type="button" class="chip" role="radio" aria-checked="true" data-reason="traffic">Traffic</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="road_blocked">Road blocked</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="vehicle_issue">Vehicle problem</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="patient_deteriorating">Patient deteriorating</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="other">Other</button>
+    </div>
+    <div class="delay-reasons" id="delayMinutes" role="radiogroup" aria-label="Extra time">
+      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="5">+5 min</button>
+      <button type="button" class="chip" role="radio" aria-checked="true" data-minutes="10">+10 min</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="20">+20 min</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="">Not sure</button>
+    </div>
+    <p class="sheet-note" id="delayStatus" role="status"></p>
+    <button type="button" class="btn-primary" id="delaySendBtn">Tell the hospital</button>
   </div>
 </div>
 

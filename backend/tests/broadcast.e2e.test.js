@@ -21,6 +21,10 @@ const assert = require('assert');
 
 process.env.PORT = process.env.TEST_PORT || '5099';
 process.env.DB_DRIVER = 'memory';
+/* This suite exercises the case lifecycle with the LAN rehearsal identity
+   (?hospital=<id>). Signed-in desks are covered by auth.test.js. */
+process.env.DESK_AUTH = 'ip';
+process.env.DEMO_SEED = 'false';
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const { io: ioClient } = require('socket.io-client');
@@ -86,15 +90,21 @@ const SAMPLE = {
   stroke_assessment: { face: false, arm: true, speech: true, onset_hours: 2 }
 };
 
+/* Crew tokens, as the ambulance app keeps them: one per case it created. */
+const tokens = {};
 function broadcast(overrides) {
   return fetch(`${BASE}/api/v1/requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(Object.assign({}, SAMPLE, overrides || {}))
-  }).then(async r => ({ status: r.status, body: await r.json() }));
+  }).then(async r => {
+    const body = await r.json();
+    if (body && body.id && body.crew_token) tokens[body.id] = body.crew_token;
+    return { status: r.status, body };
+  });
 }
 
-const statusOf = code => fetch(`${BASE}/api/v1/requests/${code}`).then(r => r.json());
+const statusOf = code => fetch(`${BASE}/api/v1/requests/${code}`, { headers: { 'X-Crew-Token': tokens[code] || '' } }).then(r => r.json());
 
 async function main() {
   await waitForListening();
@@ -138,8 +148,21 @@ async function main() {
   check('the server computed the priority (the app never sends one)', () => {
     assert.strictEqual(created.body.priority, 'RED');   // SBP 82, SpO2 88
   });
+  check('the creating ambulance gets a crew token, once', () => {
+    assert.ok(typeof created.body.crew_token === 'string' && created.body.crew_token.length >= 32);
+  });
 
   const code = created.body.id;
+  const noToken = await fetch(`${BASE}/api/v1/requests/${code}`);
+  const wrongToken = await fetch(`${BASE}/api/v1/requests/${code}`, { headers: { 'X-Crew-Token': 'x'.repeat(32) } });
+  check('a case code alone does not open the case (sequential codes are guessable)', () => {
+    assert.strictEqual(noToken.status, 404);
+    assert.strictEqual(wrongToken.status, 404);
+  });
+  const cancelNoToken = await fetch(`${BASE}/api/v1/requests/${code}/cancel`, { method: 'POST' });
+  check('nobody without the token can cancel the case', () => {
+    assert.strictEqual(cancelNoToken.status, 404);
+  });
   await sleep(150);
 
   check('laptop 1 received the case over the socket', () => {
@@ -274,7 +297,7 @@ async function main() {
   const third = await broadcast({ case_type_id: 3 });
   const code3 = third.body.id;
   await sleep(120);
-  await fetch(`${BASE}/api/v1/requests/${code3}/cancel`, { method: 'POST' });
+  await fetch(`${BASE}/api/v1/requests/${code3}/cancel`, { method: 'POST', headers: { 'X-Crew-Token': tokens[code3] } });
   await sleep(120);
   check('both laptops are told to drop it', () => {
     assert.ok(a.seen.cancelled.some(d => d.case_code === code3));
@@ -316,6 +339,11 @@ async function main() {
   check('a request with no case type is rejected', () => {
     assert.strictEqual(bad.status, 400);
   });
+  const unknownType = await broadcast({ case_type_id: 999, stroke_assessment: undefined });
+  check('an unknown case type id is rejected, not shown as a generic emergency', () => {
+    assert.strictEqual(unknownType.status, 400);
+    assert.strictEqual(unknownType.body.field, 'case_type_id');
+  });
 
   /* null coordinates used to slip through the undefined check and create a
      case no hospital could ever be matched to. */
@@ -327,7 +355,7 @@ async function main() {
   check('impossible coordinates are rejected', () => {
     assert.strictEqual(wildOrigin.status, 400);
   });
-  const missing = await fetch(`${BASE}/api/v1/requests/GH-1999-0001`);
+  const missing = await fetch(`${BASE}/api/v1/requests/GH-1999-0001`, { headers: { 'X-Crew-Token': 'whatever-token-value-000000000000' } });
   check('an unknown case code is a 404', () => {
     assert.strictEqual(missing.status, 404);
   });

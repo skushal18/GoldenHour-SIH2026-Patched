@@ -6,7 +6,8 @@ const express = require('express');
 const router = express.Router();
 const hospitalsConfig = require('../config/hospitals');
 const { deskGuard, deskAuthMode } = require('../middleware/hospitalIdentity');
-const { getStore } = require('../store');
+const { getStore, getAccounts } = require('../store');
+const directory = require('../services/directoryService');
 const { acceptBroadcast, declineBroadcast, markArrived, toDashboardCard } = require('../services/broadcastService');
 const capacity = require('../services/capacityService');
 const tracking = require('../services/trackingService');
@@ -31,9 +32,27 @@ router.post('/arrived/:caseCode', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/* The demo laptop list (with IPs) only means anything in the LAN rehearsal mode. */
 router.get('/laptops', (req, res) => {
+  if (deskAuthMode() === 'jwt') return res.status(404).json({ success: false, reason: 'NOT_FOUND' });
   res.json({ hackathon_mode: hospitalsConfig.HACKATHON_MODE,
     laptops: hospitalsConfig.HOSPITAL_LAPTOPS.map(h => ({ hospital_id:h.hospital_id, code:h.code, ip:h.ip, name:h.name, accent:h.accent })) });
+});
+
+/* Hospitals near this one from the national directory, flagged by whether
+   they are on GoldenHour and what they last reported. */
+router.get('/nearby', async (req, res, next) => {
+  try {
+    const h = req.hospital;
+    if (!h || h.lat == null || h.lng == null) return res.json({ hospitals: [] });
+    const km = Math.min(Math.max(Number(req.query.km) || 5, 1), 30);
+    const onBoard = new Set(await getAccounts().activeHospitalIds());
+    const list = directory.nearby(h.lat, h.lng, km, { emergencyOnly: true, limit: 12,
+      filter: x => x.hospital_id !== h.hospital_id });
+    res.json({ km, hospitals: list.map(x => ({ hospital_id: x.hospital_id, name: x.name, distance_km: x.distance_km,
+      on_goldenhour: onBoard.has(x.hospital_id), capacity: onBoard.has(x.hospital_id) ? capacity.get(x.hospital_id) : null,
+      phone: x.contact, location_quality: x.coord_source === 'listed' ? 'listed' : 'approximate' })) });
+  } catch (err) { next(err); }
 });
 
 router.get('/queue', async (req, res) => {
@@ -78,10 +97,9 @@ router.get('/capacity', (req, res) => {
 });
 router.put('/capacity', (req, res) => {
   const c = capacity.upsert(req.hospital.hospital_id, req.body || {});
+  if (c.error) return res.status(400).json({ success: false, reason: 'INVALID_CAPACITY', field: c.field, message: c.message });
+  audit.record('CAPACITY', 'CAPACITY_CHANGED', { hospital_id: req.hospital.hospital_id, after: c }, { kind: 'desk', hospital_id: req.hospital.hospital_id });
   res.json({ capacity: c });
-});
-router.get('/capacity/all', (req, res) => {
-  res.json({ capacity: capacity.all(), stale_minutes: Number(process.env.CAPACITY_STALE_MINUTES || 60) });
 });
 
 /* v5 ── Track ── */
@@ -156,40 +174,41 @@ router.get('/timeline/:caseCode', async (req, res) => {
 });
 
 /* v5 ── Analytics ── */
+/* Hospital scope = cases this hospital was offered. Network scope = every case.
+   (Previously the hospital filter was computed and then never used, so
+   "your hospital" figures were network-wide.) */
 router.get('/analytics', async (req, res) => {
   try{
     const scope = req.query.scope === 'network' ? 'network' : 'hospital';
-    const events = audit.all();
-    const mine = (scope === 'hospital')
-      ? events.filter(e => (e.performed_by||'').startsWith(`desk:${req.hospital.hospital_id}`) || e.event_type === 'BROADCAST_CREATED')
-      : events;
-
-    const broadcastToAccept = events.filter(e => e.event_type==='ACCEPTED').map(e => e.event_data && e.event_data.seconds_to_accept).filter(x => typeof x === 'number');
-    const leadTime = events.filter(e => e.event_type==='ARRIVED').map(e => e.event_data && e.event_data.seconds_accept_to_arrival).filter(x => typeof x === 'number');
-
-    const accepted = events.filter(e => e.event_type==='ACCEPTED').length;
-    const created = events.filter(e => e.event_type==='BROADCAST_CREATED').length;
-    const expired = events.filter(e => e.event_type==='EXPIRED').length;
+    const myId = Number(req.hospital.hospital_id);
+    const events = audit.caseEvents();
+    let inScope = null;
+    if (scope === 'hospital') {
+      const offered = await getStore().listForHospital(myId, { includeResolved: true, offeredOnly: true });
+      inScope = new Set(offered.map(r => r.case_code));
+    }
+    const mine = inScope ? events.filter(e => inScope.has(e.case_code)) : events;
+    const acceptedEvents = mine.filter(e => e.event_type === 'ACCEPTED' && (scope === 'network' || Number(e.event_data && e.event_data.hospital_id) === myId));
+    const arrivedEvents = mine.filter(e => e.event_type === 'ARRIVED' && (scope === 'network' || Number(e.event_data && e.event_data.hospital_id) === myId));
+    const broadcastToAccept = acceptedEvents.map(e => e.event_data && e.event_data.seconds_to_accept).filter(x => typeof x === 'number');
+    const leadTime = arrivedEvents.map(e => e.event_data && e.event_data.seconds_accept_to_arrival).filter(x => typeof x === 'number');
+    const created = mine.filter(e => e.event_type === 'BROADCAST_CREATED').length;
+    const expired = mine.filter(e => e.event_type === 'EXPIRED').length;
 
     function percentile(arr, p){
       if (!arr.length) return null;
       const a = arr.slice().sort((x,y)=>x-y);
-      const idx = Math.min(a.length-1, Math.floor((p/100) * a.length));
-      return a[idx];
+      return a[Math.min(a.length-1, Math.floor((p/100) * a.length))];
     }
-    function median(arr){ return percentile(arr, 50); }
-
-    let store = 'memory';
-    try { store = require('../store').getStore().driver; } catch(_){}
-
+    const store = getStore().driver;
     res.json({
-      scope,
-      store,
-      counts: { created, accepted, expired, lead_time_samples: leadTime.length, time_to_accept_samples: broadcastToAccept.length },
-      time_to_accept: { median: median(broadcastToAccept), p90: percentile(broadcastToAccept, 90) },
-      lead_time: { median: median(leadTime) },
-      accept_rate: created ? Math.round((accepted/created) * 100) : 0,
-      delays: events.filter(e => e.event_type==='DELAY_REPORTED').length,
+      scope, store,
+      counts: { created, accepted: acceptedEvents.length, arrived: arrivedEvents.length, expired,
+        lead_time_samples: leadTime.length, time_to_accept_samples: broadcastToAccept.length },
+      time_to_accept: { median: percentile(broadcastToAccept, 50), p90: percentile(broadcastToAccept, 90) },
+      lead_time: { median: percentile(leadTime, 50) },
+      accept_rate: created ? Math.round((acceptedEvents.length/created) * 100) : 0,
+      delays: mine.filter(e => e.event_type === 'DELAY_REPORTED').length,
     });
   }catch(e){ res.status(500).json({ success:false }); }
 });

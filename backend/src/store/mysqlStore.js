@@ -58,12 +58,14 @@ function createMysqlStore(pool) {
         for (const t of targets){ await conn.query(`INSERT INTO broadcast_targets (case_code, hospital_id, hospital_name, hospital_contact, hospital_lat, hospital_lng, distance_km, status) VALUES (?,?,?,?,?,?,?,'PENDING')`,
           [record.case_code, t.hospital_id, t.name, t.contact||null, t.lat, t.lng, t.distance_km]); }
         await conn.commit();
-      }catch(e){ await conn.rollback(); conn.release(); throw e; } finally{ conn.release(); }
+      }catch(e){ await conn.rollback(); throw e; } finally{ conn.release(); }
       return record; },
     async getBroadcast(code){ return loadOne(pool, code); },
     async listForHospital(hospitalId, options){
       const opts=options||{};
-      const [rows]=await pool.query(`SELECT b.*, t.status AS target_status FROM broadcasts b JOIN broadcast_targets t ON t.case_code=b.case_code WHERE t.hospital_id=? ORDER BY b.created_at DESC LIMIT 100`,[Number(hospitalId)]);
+      const limit=opts.offeredOnly?5000:100;
+      const [rows]=await pool.query(`SELECT b.*, t.status AS target_status FROM broadcasts b JOIN broadcast_targets t ON t.case_code=b.case_code WHERE t.hospital_id=? ORDER BY b.created_at DESC LIMIT ?`,[Number(hospitalId), limit]);
+      if (opts.offeredOnly) return rows.map(r=>({ case_code:r.case_code, status:r.status, accepted_hospital_id:r.accepted_hospital_id }));
       const keep=rows.filter(r=>{
         if (r.accepted_hospital_id && Number(r.accepted_hospital_id)!==Number(hospitalId)) return false;
         if (opts.includeResolved) return true;
@@ -85,7 +87,7 @@ function createMysqlStore(pool) {
           return { ok:false, reason: cur.length?(cur[0].status==='ACCEPTED'?'ALREADY_ACCEPTED':cur[0].status):'NOT_FOUND', record: await loadOne(pool,code) }; }
         await conn.query(`UPDATE broadcast_targets SET status=CASE WHEN hospital_id=? THEN 'ACCEPTED' ELSE 'CANCELLED' END WHERE case_code=?`,[id,code]);
         await conn.commit();
-      }catch(e){ await conn.rollback(); conn.release(); throw e; } finally{ conn.release(); }
+      }catch(e){ await conn.rollback(); throw e; } finally{ conn.release(); }
       return { ok:true, record: await loadOne(pool, code) };
     },
     async decline(code, hid){ const id=Number(hid);
@@ -129,6 +131,7 @@ function createMysqlStore(pool) {
     async markArrived(code){ const conn=await pool.getConnection();
       try{ await conn.beginTransaction();
         const [u]=await conn.query(`UPDATE broadcasts SET status='ARRIVED', arrived_at=NOW() WHERE case_code=? AND status='ACCEPTED'`,[code]);
+        if (u.affectedRows) await conn.query(`UPDATE broadcast_targets SET status='CLOSED' WHERE case_code=? AND status='ACCEPTED'`,[code]);
         await conn.commit();
         if (!u.affectedRows){ const r=await loadOne(pool,code); return r && r.status==='ARRIVED' ? { ok:true, record:r, already:true } : { ok:false, reason:'NOT_ACCEPTED' }; }
       }catch(e){ await conn.rollback(); throw e; } finally{ conn.release(); }

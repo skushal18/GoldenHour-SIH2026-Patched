@@ -97,7 +97,8 @@ export function createOutbox(storage, options) {
           entry.last_attempt_at = new Date().toISOString();
           entry.last_error = (err && err.message) || 'unknown';
           /* A refusal is final. Anything else is worth another try. */
-          if (err && err.status >= 400 && err.status < 500) {
+          /* 429 is "slow down", not "this case is wrong": keep it for the next try. */
+          if (err && err.status >= 400 && err.status < 500 && err.status !== 429) {
             if (opts.onRejected) opts.onRejected(entry, err);
           } else {
             keep.push(entry);

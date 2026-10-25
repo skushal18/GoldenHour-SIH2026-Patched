@@ -134,6 +134,7 @@ function boot(win, doc) {
     lastResponse: null,
     lastPayload: null,
     lastClientRequestId: null,
+    crewTokens: {},
   };
 
   let pollTimer = null;
@@ -969,6 +970,7 @@ function boot(win, doc) {
         ' within ' + payload.broadcast_radius_km + ' km.';
     }
     updateStatusChip({ status: 'PENDING' });
+    paintCallAhead(res.call_ahead, Number(res.hospitals_notified) || 0);
     const accepted = $('acceptedBox');
     if (accepted) accepted.hidden = true;
     ['callBtn', 'navBtn'].forEach(id => { const el = $(id); if (el) el.hidden = true; });
@@ -1001,6 +1003,7 @@ function boot(win, doc) {
     const status = body && body.status;
 
     if (status === 'ACCEPTED' || status === 'ARRIVED') {
+      paintCallAhead(null, 1);
       chip.className = 'status-chip status-accepted';
       const name = (body.accepted_hospital && body.accepted_hospital.name) || body.accepted_by || 'a hospital';
       text.textContent = status === 'ARRIVED' ? 'Arrived at ' + name : 'Accepted by ' + name;
@@ -1009,13 +1012,40 @@ function boot(win, doc) {
     }
     if (status === 'EXPIRED' || status === 'REJECTED' || status === 'CANCELLED') {
       chip.className = 'status-chip status-failed';
-      text.textContent = status === 'CANCELLED' ? 'Cancelled' : 'No hospital accepted';
+      text.textContent = status === 'CANCELLED' ? 'Cancelled'
+        : (Number(body.hospitals_notified) === 0 ? 'No GoldenHour hospital in range' : 'No hospital accepted');
       if (accepted) accepted.hidden = true;
+      if (status !== 'CANCELLED') paintCallAhead(body.call_ahead, Number(body.hospitals_notified) || 0);
       return;
     }
     chip.className = 'status-chip status-pending';
     text.textContent = 'Waiting for a hospital to accept…';
     if (accepted) accepted.hidden = true;
+  }
+
+  /* Hospitals near the ambulance that are not on GoldenHour, with phone
+     numbers, from the national directory. Shown when nobody on GoldenHour
+     could take the case (or none was in range), so the crew can call ahead
+     instead of staring at "no hospital accepted". */
+  function paintCallAhead(list, notified) {
+    const box = $('callAheadBox'), rows = $('callAheadList'), title = $('callAheadTitle');
+    if (!box || !rows) return;
+    const items = Array.isArray(list) ? list.filter(h => h && h.phone) : [];
+    if (!items.length) { box.hidden = true; return; }
+    if (title) title.textContent = notified === 0 ? 'No GoldenHour hospital in range — call ahead' : 'Also nearby — call ahead';
+    rows.textContent = '';
+    items.slice(0, 5).forEach(h => {
+      const row = doc.createElement('div'); row.className = 'call-ahead-row';
+      const name = doc.createElement('span'); name.textContent = h.name;
+      const meta = doc.createElement('small');
+      meta.textContent = (h.location_quality === 'listed' ? '' : '≈ ') + Number(h.distance_km).toFixed(1) + ' km' + (h.district ? ' · ' + h.district : '');
+      name.appendChild(meta);
+      const call = doc.createElement('a'); call.href = 'tel:' + String(h.phone).split(/[,/]/)[0].replace(/[^\d+]/g, '');
+      call.textContent = 'Call';
+      call.setAttribute('aria-label', 'Call ' + h.name);
+      row.appendChild(name); row.appendChild(call); rows.appendChild(row);
+    });
+    box.hidden = false;
   }
 
   function paintAcceptedHospital(hospital, priority) {
@@ -1068,7 +1098,7 @@ function boot(win, doc) {
     const tick = async () => {
       if (stopped) return;
       try {
-        const body = await transport.status(caseCode);
+        const body = await transport.status(caseCode, crewTokenFor(caseCode));
         applyStatus(body);
         if (body.status === 'ARRIVED' || body.status === 'EXPIRED' ||
             body.status === 'REJECTED' || body.status === 'CANCELLED') {
@@ -1108,12 +1138,19 @@ function boot(win, doc) {
 
   /* ── Realtime + position sharing ─────────────────────────────────────── */
 
+  /* The crew token for a case this phone created (kept in the case book so
+     it survives an app restart). Every crew action on the case carries it. */
+  function crewTokenFor(caseCode) {
+    const entry = caseBook.get(caseCode);
+    return (entry && entry.crew_token) || state.crewTokens[caseCode] || null;
+  }
+
   function followCase(caseCode) {
     if (state.demo || !env.realtime || !win.io) return;
     try {
       socket = win.io(env.serverBase || undefined, { transports: ['websocket', 'polling'] });
     } catch (_) { socket = null; return; }
-    socket.on('connect', () => socket.emit('case:follow', caseCode));
+    socket.on('connect', () => socket.emit('case:follow', { case_code: caseCode, crew_token: crewTokenFor(caseCode) }));
     socket.on('case:status', body => applyStatus(normaliseStatus(body)));
     socket.on('case:position', body => paintTracking(body));
     socket.on('disconnect', () => { const t = $('trackingText'); if (t) t.textContent = 'Disconnected — hospital is not receiving location updates'; });
@@ -1154,7 +1191,7 @@ function boot(win, doc) {
         let confirmed = false;
         const timer = setTimeout(() => { if (!confirmed && text && state.activeCaseCode === code) text.textContent = 'Location delivery unconfirmed — waiting for connection'; }, 6000);
         socket.volatile.emit('ambulance:position', {
-          case_code: code, lat: coords.lat, lng: coords.lng,
+          case_code: code, crew_token: crewTokenFor(code), lat: coords.lat, lng: coords.lng,
           accuracy_m: toNumberOrNull(c.accuracy),
           speed_kmh: c.speed != null && c.speed >= 0 ? Math.round(c.speed * 3.6) : null,
           source: 'gps', at: new Date(timestamp).toISOString(),
@@ -1197,10 +1234,43 @@ function boot(win, doc) {
         (body.live_eta_minutes != null ? ' · ' + body.live_eta_minutes + ' min out' : '');
   }
 
+  /* Report delay: pick a reason and roughly how long, then tell the
+     hospital. Success is shown only after the server confirms it reached
+     the accepting hospital's board — never before. */
+  const delayChoice = { reason: 'traffic', minutes: 10 };
+  function pickIn(containerId, attr, value) {
+    const c = $(containerId); if (!c) return;
+    c.querySelectorAll('[' + attr + ']').forEach(b => b.setAttribute('aria-checked', b.getAttribute(attr) === String(value) ? 'true' : 'false'));
+  }
   on($('delayedBtn'), 'click', () => {
-    if (!state.activeCaseCode || !socket) { toast('Not sharing location yet'); return; }
-    socket.emit('ambulance:delayed', { case_code: state.activeCaseCode, reason: 'traffic' }, () => {});
-    toast('The hospital has been told you are delayed');
+    if (!state.activeCaseCode) { toast('No active case'); return; }
+    if ((caseBook.get(state.activeCaseCode) || {}).status !== 'ACCEPTED') { toast('A delay can be reported once a hospital has accepted'); return; }
+    const st = $('delayStatus'); if (st) st.textContent = '';
+    openOverlay('delayOverlay');
+  });
+  on($('delayReasons'), 'click', e => {
+    const b = e.target.closest('[data-reason]'); if (!b) return;
+    delayChoice.reason = b.getAttribute('data-reason'); pickIn('delayReasons', 'data-reason', delayChoice.reason);
+  });
+  on($('delayMinutes'), 'click', e => {
+    const b = e.target.closest('[data-minutes]'); if (!b) return;
+    const v = b.getAttribute('data-minutes'); delayChoice.minutes = v === '' ? null : Number(v);
+    pickIn('delayMinutes', 'data-minutes', v);
+  });
+  on($('delaySendBtn'), 'click', () => {
+    const st = $('delayStatus');
+    if (state.demo) { if (st) st.textContent = 'Demo mode — nothing was sent.'; setTimeout(() => closeOverlay('delayOverlay'), 800); return; }
+    if (!socket || !socket.connected) { if (st) st.textContent = 'Not connected — the hospital has NOT been told. Call them if you can.'; return; }
+    const btn = $('delaySendBtn'); if (btn) btn.disabled = true;
+    if (st) st.textContent = 'Sending…';
+    let answered = false;
+    const timer = setTimeout(() => { if (!answered && st) st.textContent = 'No confirmation yet — the hospital may not have been told.'; if (btn) btn.disabled = false; }, 6000);
+    socket.emit('ambulance:delayed', { case_code: state.activeCaseCode, crew_token: crewTokenFor(state.activeCaseCode),
+      reason: delayChoice.reason, extra_minutes: delayChoice.minutes }, ack => {
+      answered = true; clearTimeout(timer); if (btn) btn.disabled = false;
+      if (ack && ack.success) { toast('The hospital has been told you are delayed'); closeOverlay('delayOverlay'); }
+      else if (st) st.textContent = (ack && ack.message) || 'The server did not accept the delay report.';
+    });
   });
 
   /* ── Arrived ─────────────────────────────────────────────────────────── */
@@ -1214,7 +1284,7 @@ function boot(win, doc) {
 
     arrivalInFlight = true;
     try {
-      if (!state.demo) await recordArrival({ socket, fetch: win.fetch && win.fetch.bind(win), apiRoot: env.apiRoot, caseCode: state.activeCaseCode });
+      if (!state.demo) await recordArrival({ socket, fetch: win.fetch && win.fetch.bind(win), apiRoot: env.apiRoot, caseCode: state.activeCaseCode, crewToken: crewTokenFor(state.activeCaseCode) });
       stopSharingPosition();
       caseBook.setStatus(state.activeCaseCode, 'ARRIVED');
       updateStatusChip({ status: 'ARRIVED', accepted_by: (caseBook.get(state.activeCaseCode) || {}).accepted_by });
@@ -1316,7 +1386,7 @@ function boot(win, doc) {
       return;
     }
     if (status) status.textContent = 'Sending…';
-    socket.emit('patient:update', { case_code: state.activeCaseCode, patient: patch }, body => {
+    socket.emit('patient:update', { case_code: state.activeCaseCode, crew_token: crewTokenFor(state.activeCaseCode), patient: patch }, body => {
       if (body && body.success) {
         applyLocalPatch(patch);
         if (status) status.textContent = 'Saved. The hospital has it.';
@@ -1412,14 +1482,15 @@ function boot(win, doc) {
 
   function recordCase(res, payload, status) {
     const type = state.caseTypes.find(t => Number(t.id) === Number(payload.case_type_id));
-    caseBook.record({
+    if (res.crew_token) state.crewTokens[res.id] = res.crew_token;
+    caseBook.record(Object.assign({
       case_code: res.id,
       case_label: type ? (type.short || type.label) : 'Case',
       age: payload.age,
       gender: payload.gender,
       status,
       eta_minutes: payload.eta_minutes,
-    });
+    }, res.crew_token ? { crew_token: res.crew_token } : {}));
     renderHome();
   }
 

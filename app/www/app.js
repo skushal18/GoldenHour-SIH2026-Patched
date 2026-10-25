@@ -666,11 +666,11 @@
       clear();
     };
   }
-  async function recordArrival({ socket, fetch: fetcher, apiRoot, caseCode, timeoutMs = 5e3 }) {
+  async function recordArrival({ socket, fetch: fetcher, apiRoot, caseCode, crewToken, timeoutMs = 5e3 }) {
     if (socket && socket.connected) {
       const ack = await new Promise((resolve) => {
         const timer2 = setTimeout(() => resolve(null), timeoutMs);
-        socket.emit("ambulance:arrived", { case_code: caseCode }, (body) => {
+        socket.emit("ambulance:arrived", { case_code: caseCode, crew_token: crewToken }, (body) => {
           clearTimeout(timer2);
           resolve(body);
         });
@@ -682,7 +682,7 @@
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetcher(apiRoot + "/requests/" + encodeURIComponent(caseCode) + "/arrived", { method: "POST", signal: controller.signal });
+      const response = await fetcher(apiRoot + "/requests/" + encodeURIComponent(caseCode) + "/arrived", { method: "POST", signal: controller.signal, headers: { "X-Crew-Token": crewToken || "" } });
       const body = await response.json();
       if (!response.ok || !body || body.success !== true || body.status !== "ARRIVED") throw new Error(body && body.message || "Arrival was refused");
       return body;
@@ -818,36 +818,36 @@
     { id: 1, category: "TRAUMA", label: "Road accident — multiple injuries", quick: true, short: "Road accident" },
     { id: 2, category: "TRAUMA", label: "Head injury", quick: true, short: "Head injury" },
     { id: 3, category: "TRAUMA", label: "Fall from height" },
-    { id: 4, category: "TRAUMA", label: "Crush injury / amputation" },
-    { id: 5, category: "TRAUMA", label: "Penetrating injury / stabbing" },
-    { id: 6, category: "TRAUMA", label: "Major burns" },
-    { id: 7, category: "TRAUMA", label: "Spinal injury suspected" },
-    { id: 8, category: "CARDIAC", label: "Chest pain — suspected heart attack", quick: true, short: "Chest pain" },
-    { id: 9, category: "CARDIAC", label: "Cardiac arrest", quick: true, short: "Cardiac arrest" },
-    { id: 10, category: "CARDIAC", label: "Irregular heartbeat / palpitations" },
-    { id: 11, category: "CARDIAC", label: "Heart failure / severe swelling" },
-    { id: 12, category: "STROKE", label: "Stroke — sudden weakness or slurred speech", quick: true, short: "Stroke" },
-    { id: 13, category: "STROKE", label: "Transient ischaemic attack" },
-    { id: 14, category: "NEURO", label: "Seizure / fitting" },
+    { id: 4, category: "TRAUMA", label: "Stab / gunshot / penetrating wound" },
+    { id: 5, category: "TRAUMA", label: "Major burns" },
+    { id: 6, category: "TRAUMA", label: "Crush injury / amputation" },
+    { id: 7, category: "TRAUMA", label: "Suspected spinal injury" },
+    { id: 8, category: "CARDIAC", label: "Chest pain / suspected heart attack", quick: true, short: "Chest pain" },
+    { id: 9, category: "CARDIAC", label: "Cardiac arrest — CPR in progress", quick: true, short: "Cardiac arrest" },
+    { id: 10, category: "CARDIAC", label: "Irregular heartbeat / arrhythmia" },
+    { id: 11, category: "CARDIAC", label: "Heart failure / fluid in lungs" },
+    { id: 12, category: "STROKE", label: "Stroke / sudden weakness or slurred speech", quick: true, short: "Stroke" },
+    { id: 13, category: "STROKE", label: "Suspected TIA" },
+    { id: 14, category: "NEURO", label: "Seizure / fits" },
     { id: 15, category: "NEURO", label: "Unresponsive — cause unknown" },
-    { id: 16, category: "RESP", label: "Severe breathlessness", quick: true, short: "Breathless" },
-    { id: 17, category: "RESP", label: "Asthma attack" },
-    { id: 18, category: "RESP", label: "Choking / airway obstruction" },
-    { id: 19, category: "RESP", label: "Drowning / near-drowning" },
-    { id: 20, category: "OBSTETRIC", label: "Labour / imminent delivery" },
-    { id: 21, category: "OBSTETRIC", label: "Pregnancy complication / bleeding" },
-    { id: 22, category: "OBSTETRIC", label: "Eclampsia / seizure in pregnancy" },
-    { id: 23, category: "PAEDIATRIC", label: "Child — serious illness" },
-    { id: 24, category: "PAEDIATRIC", label: "Child — injury" },
-    { id: 25, category: "PAEDIATRIC", label: "Newborn in distress" },
-    { id: 26, category: "TOXIC", label: "Poisoning / overdose" },
-    { id: 27, category: "TOXIC", label: "Snake or animal bite" },
-    { id: 28, category: "TOXIC", label: "Severe allergic reaction" },
-    { id: 29, category: "TOXIC", label: "Smoke or gas inhalation" },
-    { id: 30, category: "MEDICAL", label: "Diabetic emergency" },
-    { id: 31, category: "MEDICAL", label: "Heavy bleeding — non-trauma" },
-    { id: 32, category: "MEDICAL", label: "Severe abdominal pain" },
-    { id: 33, category: "MEDICAL", label: "Severe infection / sepsis suspected" }
+    { id: 16, category: "RESP", label: "Severe breathlessness / asthma attack", quick: true, short: "Breathless" },
+    { id: 17, category: "RESP", label: "COPD flare-up" },
+    { id: 18, category: "RESP", label: "Choking / blocked airway" },
+    { id: 19, category: "RESP", label: "Drowning" },
+    { id: 20, category: "METABOLIC", label: "Low blood sugar" },
+    { id: 21, category: "METABOLIC", label: "High blood sugar / DKA" },
+    { id: 22, category: "METABOLIC", label: "Heat stroke" },
+    { id: 23, category: "OBSTETRIC", label: "Labour / delivery imminent" },
+    { id: 24, category: "OBSTETRIC", label: "Pregnancy emergency" },
+    { id: 25, category: "OBSTETRIC", label: "Newborn in distress" },
+    { id: 26, category: "PAEDIATRIC", label: "Sick child" },
+    { id: 27, category: "PAEDIATRIC", label: "Injured child" },
+    { id: 28, category: "POISONING", label: "Poisoning / overdose" },
+    { id: 29, category: "POISONING", label: "Snake bite / animal bite" },
+    { id: 30, category: "ALLERGY", label: "Severe allergic reaction (anaphylaxis)" },
+    { id: 31, category: "OTHER", label: "Heavy bleeding (not from injury)" },
+    { id: 32, category: "OTHER", label: "Psychiatric emergency" },
+    { id: 33, category: "OTHER", label: "Other emergency" }
   ];
   const CATEGORY_LABELS = [
     ["TRAUMA", "Trauma & injury"],
@@ -855,10 +855,12 @@
     ["STROKE", "Stroke"],
     ["NEURO", "Neurological"],
     ["RESP", "Breathing & airway"],
+    ["METABOLIC", "Sugar, heat & metabolic"],
     ["OBSTETRIC", "Pregnancy & birth"],
     ["PAEDIATRIC", "Children"],
-    ["TOXIC", "Poisoning & bites"],
-    ["MEDICAL", "Other medical"]
+    ["POISONING", "Poisoning & bites"],
+    ["ALLERGY", "Allergy"],
+    ["OTHER", "Other emergencies"]
   ];
   function categoryOf(caseTypes, id) {
     const n = toNumberOrNull(id);
@@ -1073,10 +1075,12 @@
         if (!res.ok) throw new RejectedError(body && body.message || "HTTP " + res.status, res.status);
         return body;
       },
-      async status(caseCode) {
+      /* The crew token returned by broadcast() is what opens the case: case
+         codes are sequential, so the code alone must not reveal a patient. */
+      async status(caseCode, crewToken) {
         let res;
         try {
-          res = await doFetch(url("/requests/" + encodeURIComponent(caseCode)));
+          res = await doFetch(url("/requests/" + encodeURIComponent(caseCode)), { headers: { "X-Crew-Token": crewToken || "" } });
         } catch (err) {
           throw new NetworkError(err && err.message);
         }
@@ -1106,6 +1110,7 @@
         cases.set(id, { id, created: now, payload });
         return {
           id,
+          crew_token: "demo-" + id,
           status: "PENDING",
           hospitals_notified: DEMO_HOSPITALS_NOTIFIED,
           expires_at: new Date(now + 18e4).toISOString(),
@@ -1221,7 +1226,7 @@
             entry.attempts += 1;
             entry.last_attempt_at = (/* @__PURE__ */ new Date()).toISOString();
             entry.last_error = err && err.message || "unknown";
-            if (err && err.status >= 400 && err.status < 500) {
+            if (err && err.status >= 400 && err.status < 500 && err.status !== 429) {
               if (opts.onRejected) opts.onRejected(entry, err);
             } else {
               keep.push(entry);
@@ -1424,7 +1429,8 @@
       activeCaseCode: null,
       lastResponse: null,
       lastPayload: null,
-      lastClientRequestId: null
+      lastClientRequestId: null,
+      crewTokens: {}
     };
     let pollTimer = null;
     let flushTimer = null;
@@ -2219,6 +2225,7 @@
         info.textContent = "Sent to " + count + " nearby hospital" + (count === 1 ? "" : "s") + " within " + payload.broadcast_radius_km + " km.";
       }
       updateStatusChip({ status: "PENDING" });
+      paintCallAhead(res.call_ahead, Number(res.hospitals_notified) || 0);
       const accepted = $("acceptedBox");
       if (accepted) accepted.hidden = true;
       ["callBtn", "navBtn"].forEach((id) => {
@@ -2262,6 +2269,7 @@
       if (!chip || !text) return;
       const status = body && body.status;
       if (status === "ACCEPTED" || status === "ARRIVED") {
+        paintCallAhead(null, 1);
         chip.className = "status-chip status-accepted";
         const name = body.accepted_hospital && body.accepted_hospital.name || body.accepted_by || "a hospital";
         text.textContent = status === "ARRIVED" ? "Arrived at " + name : "Accepted by " + name;
@@ -2270,13 +2278,42 @@
       }
       if (status === "EXPIRED" || status === "REJECTED" || status === "CANCELLED") {
         chip.className = "status-chip status-failed";
-        text.textContent = status === "CANCELLED" ? "Cancelled" : "No hospital accepted";
+        text.textContent = status === "CANCELLED" ? "Cancelled" : Number(body.hospitals_notified) === 0 ? "No GoldenHour hospital in range" : "No hospital accepted";
         if (accepted) accepted.hidden = true;
+        if (status !== "CANCELLED") paintCallAhead(body.call_ahead, Number(body.hospitals_notified) || 0);
         return;
       }
       chip.className = "status-chip status-pending";
       text.textContent = "Waiting for a hospital to accept…";
       if (accepted) accepted.hidden = true;
+    }
+    function paintCallAhead(list, notified) {
+      const box = $("callAheadBox"), rows = $("callAheadList"), title = $("callAheadTitle");
+      if (!box || !rows) return;
+      const items = Array.isArray(list) ? list.filter((h) => h && h.phone) : [];
+      if (!items.length) {
+        box.hidden = true;
+        return;
+      }
+      if (title) title.textContent = notified === 0 ? "No GoldenHour hospital in range — call ahead" : "Also nearby — call ahead";
+      rows.textContent = "";
+      items.slice(0, 5).forEach((h) => {
+        const row = doc.createElement("div");
+        row.className = "call-ahead-row";
+        const name = doc.createElement("span");
+        name.textContent = h.name;
+        const meta = doc.createElement("small");
+        meta.textContent = (h.location_quality === "listed" ? "" : "≈ ") + Number(h.distance_km).toFixed(1) + " km" + (h.district ? " · " + h.district : "");
+        name.appendChild(meta);
+        const call = doc.createElement("a");
+        call.href = "tel:" + String(h.phone).split(/[,/]/)[0].replace(/[^\d+]/g, "");
+        call.textContent = "Call";
+        call.setAttribute("aria-label", "Call " + h.name);
+        row.appendChild(name);
+        row.appendChild(call);
+        rows.appendChild(row);
+      });
+      box.hidden = false;
     }
     function paintAcceptedHospital(hospital, priority) {
       const box = $("acceptedBox");
@@ -2339,7 +2376,7 @@
       const tick = async () => {
         if (stopped) return;
         try {
-          const body = await transport.status(caseCode);
+          const body = await transport.status(caseCode, crewTokenFor(caseCode));
           applyStatus(body);
           if (body.status === "ARRIVED" || body.status === "EXPIRED" || body.status === "REJECTED" || body.status === "CANCELLED") {
             stopped = true;
@@ -2372,6 +2409,10 @@
       }
       renderHome();
     }
+    function crewTokenFor(caseCode) {
+      const entry = caseBook.get(caseCode);
+      return entry && entry.crew_token || state.crewTokens[caseCode] || null;
+    }
     function followCase(caseCode) {
       if (state.demo || !env.realtime || !win.io) return;
       try {
@@ -2380,7 +2421,7 @@
         socket = null;
         return;
       }
-      socket.on("connect", () => socket.emit("case:follow", caseCode));
+      socket.on("connect", () => socket.emit("case:follow", { case_code: caseCode, crew_token: crewTokenFor(caseCode) }));
       socket.on("case:status", (body) => applyStatus(normaliseStatus(body)));
       socket.on("case:position", (body) => paintTracking(body));
       socket.on("disconnect", () => {
@@ -2439,6 +2480,7 @@
           }, 6e3);
           socket.volatile.emit("ambulance:position", {
             case_code: code,
+            crew_token: crewTokenFor(code),
             lat: coords.lat,
             lng: coords.lng,
             accuracy_m: toNumberOrNull(c.accuracy),
@@ -2490,14 +2532,71 @@
       if (!body.position_at && !body.at) return;
       text.textContent = ["stalled", "stationary"].includes(body.eta_source) ? "Not moving — tell the hospital if you are delayed" : "Sharing location with the accepting hospital" + (body.live_eta_minutes != null ? " · " + body.live_eta_minutes + " min out" : "");
     }
+    const delayChoice = { reason: "traffic", minutes: 10 };
+    function pickIn(containerId, attr, value) {
+      const c = $(containerId);
+      if (!c) return;
+      c.querySelectorAll("[" + attr + "]").forEach((b) => b.setAttribute("aria-checked", b.getAttribute(attr) === String(value) ? "true" : "false"));
+    }
     on($("delayedBtn"), "click", () => {
-      if (!state.activeCaseCode || !socket) {
-        toast("Not sharing location yet");
+      if (!state.activeCaseCode) {
+        toast("No active case");
         return;
       }
-      socket.emit("ambulance:delayed", { case_code: state.activeCaseCode, reason: "traffic" }, () => {
+      if ((caseBook.get(state.activeCaseCode) || {}).status !== "ACCEPTED") {
+        toast("A delay can be reported once a hospital has accepted");
+        return;
+      }
+      const st = $("delayStatus");
+      if (st) st.textContent = "";
+      openOverlay("delayOverlay");
+    });
+    on($("delayReasons"), "click", (e) => {
+      const b = e.target.closest("[data-reason]");
+      if (!b) return;
+      delayChoice.reason = b.getAttribute("data-reason");
+      pickIn("delayReasons", "data-reason", delayChoice.reason);
+    });
+    on($("delayMinutes"), "click", (e) => {
+      const b = e.target.closest("[data-minutes]");
+      if (!b) return;
+      const v = b.getAttribute("data-minutes");
+      delayChoice.minutes = v === "" ? null : Number(v);
+      pickIn("delayMinutes", "data-minutes", v);
+    });
+    on($("delaySendBtn"), "click", () => {
+      const st = $("delayStatus");
+      if (state.demo) {
+        if (st) st.textContent = "Demo mode — nothing was sent.";
+        setTimeout(() => closeOverlay("delayOverlay"), 800);
+        return;
+      }
+      if (!socket || !socket.connected) {
+        if (st) st.textContent = "Not connected — the hospital has NOT been told. Call them if you can.";
+        return;
+      }
+      const btn = $("delaySendBtn");
+      if (btn) btn.disabled = true;
+      if (st) st.textContent = "Sending…";
+      let answered = false;
+      const timer = setTimeout(() => {
+        if (!answered && st) st.textContent = "No confirmation yet — the hospital may not have been told.";
+        if (btn) btn.disabled = false;
+      }, 6e3);
+      socket.emit("ambulance:delayed", {
+        case_code: state.activeCaseCode,
+        crew_token: crewTokenFor(state.activeCaseCode),
+        reason: delayChoice.reason,
+        extra_minutes: delayChoice.minutes
+      }, (ack) => {
+        answered = true;
+        clearTimeout(timer);
+        if (btn) btn.disabled = false;
+        if (ack && ack.success) {
+          toast("The hospital has been told you are delayed");
+          closeOverlay("delayOverlay");
+        } else if (st) st.textContent = ack && ack.message || "The server did not accept the delay report.";
       });
-      toast("The hospital has been told you are delayed");
     });
     let arrivalInFlight = false;
     on($("arrivedBtn"), "click", async () => {
@@ -2510,7 +2609,7 @@
       if (win.confirm && !win.confirm("Record arrival and close this case?")) return;
       arrivalInFlight = true;
       try {
-        if (!state.demo) await recordArrival({ socket, fetch: win.fetch && win.fetch.bind(win), apiRoot: env.apiRoot, caseCode: state.activeCaseCode });
+        if (!state.demo) await recordArrival({ socket, fetch: win.fetch && win.fetch.bind(win), apiRoot: env.apiRoot, caseCode: state.activeCaseCode, crewToken: crewTokenFor(state.activeCaseCode) });
         stopSharingPosition();
         caseBook.setStatus(state.activeCaseCode, "ARRIVED");
         updateStatusChip({ status: "ARRIVED", accepted_by: (caseBook.get(state.activeCaseCode) || {}).accepted_by });
@@ -2617,7 +2716,7 @@
         return;
       }
       if (status) status.textContent = "Sending…";
-      socket.emit("patient:update", { case_code: state.activeCaseCode, patient: patch }, (body) => {
+      socket.emit("patient:update", { case_code: state.activeCaseCode, crew_token: crewTokenFor(state.activeCaseCode), patient: patch }, (body) => {
         if (body && body.success) {
           applyLocalPatch(patch);
           if (status) status.textContent = "Saved. The hospital has it.";
@@ -2708,14 +2807,15 @@
     }
     function recordCase(res, payload, status) {
       const type = state.caseTypes.find((t) => Number(t.id) === Number(payload.case_type_id));
-      caseBook.record({
+      if (res.crew_token) state.crewTokens[res.id] = res.crew_token;
+      caseBook.record(Object.assign({
         case_code: res.id,
         case_label: type ? type.short || type.label : "Case",
         age: payload.age,
         gender: payload.gender,
         status,
         eta_minutes: payload.eta_minutes
-      });
+      }, res.crew_token ? { crew_token: res.crew_token } : {}));
       renderHome();
     }
     function renderHome() {

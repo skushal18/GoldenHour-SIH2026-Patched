@@ -15,6 +15,8 @@
    ========================================================================== */
 'use strict';
 
+const { findCaseType } = require('../data/caseTypes');
+
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;      // ~3 MB per photo after compression
 const MAX_NOTES = 500;
@@ -59,6 +61,10 @@ function validateBroadcast(body) {
 
   if (isBlank(b.case_type_id)) return fail('case_type_id is required', 'case_type_id');
   if (!Number.isFinite(Number(b.case_type_id))) return fail('case_type_id must be a number', 'case_type_id');
+  /* An unknown id used to be accepted and shown to the hospital as a generic
+     "Emergency". A crew app with a stale or mismatched case list must be told
+     instead, before a nurse reads the wrong complaint. */
+  if (!findCaseType(b.case_type_id)) return fail('case_type_id ' + b.case_type_id + ' is not a known case type', 'case_type_id');
 
   const lat = b.origin ? coord(b.origin.lat, 90) : null;
   const lng = b.origin ? coord(b.origin.lng, 180) : null;
@@ -132,6 +138,12 @@ function validateBroadcast(body) {
     if (!isBlank(s.onset_hours)) {
       const h = Number(s.onset_hours);
       if (!Number.isFinite(h) || h < 0 || h > 168) return fail('stroke_assessment.onset_hours must be between 0 and 168', 'stroke_assessment.onset_hours');
+    }
+    for (const key of Object.keys(s)) {
+      if (['face', 'arm', 'speech', 'onset_hours'].indexOf(key) === -1) return fail('stroke_assessment.' + key + ' is not a known field', 'stroke_assessment');
+    }
+    for (const key of ['face', 'arm', 'speech']) {
+      if (key in s && typeof s[key] !== 'boolean') return fail('stroke_assessment.' + key + ' must be true or false', 'stroke_assessment.' + key);
     }
   }
 

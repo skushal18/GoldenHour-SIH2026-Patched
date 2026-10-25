@@ -57,19 +57,21 @@ function createRateLimiter(options) {
 }
 
 function clientKey(req) {
-  /* Railway and most proxies set x-forwarded-for. Take the left-most entry,
-     which is the original client; the rest are proxies and are trivially
-     spoofable either way, so this is a throttle, never an identity. */
-  const fwd = req.headers['x-forwarded-for'];
-  if (fwd) return String(fwd).split(',')[0].trim();
-  return (req.ip || (req.socket && req.socket.remoteAddress) || 'unknown');
+  /* req.ip, which Express derives from X-Forwarded-For using the trust proxy
+     setting (one hop: Railway's edge). Reading the left-most X-Forwarded-For
+     directly, as this used to, let any client pick its own key — and so its
+     own fresh rate limit — by sending a made-up header. */
+  return req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
 }
 
 /* ── Security headers ──────────────────────────────────────────────────────
-   The two front-ends are served from this same origin, so the CSP can be
-   strict about where code and connections come from. 'unsafe-inline' for
-   style is required by the small inline theme bootstrap in each page's head;
-   scripts get no such exemption. */
+   The front-ends are served from this same origin, so the CSP is strict about
+   code: scripts only from this server (no inline scripts, no CDNs — Leaflet
+   and socket.io are vendored). Inline style stays allowed for the small
+   style attributes the pages set from script. Map tiles are the one outside
+   source: OpenStreetMap's tile servers, images only. */
+
+const TILE_HOSTS = (process.env.MAP_TILE_HOSTS || 'https://tile.openstreetmap.org https://*.tile.openstreetmap.org').split(/\s+/).filter(Boolean);
 
 function securityHeaders(req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -79,10 +81,10 @@ function securityHeaders(req, res, next) {
   res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(self), microphone=(), payment=()');
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "connect-src 'self' ws: wss: http: https:",
+    "img-src 'self' data: blob: " + TILE_HOSTS.join(' '),
+    "connect-src 'self' ws: wss:",
     "font-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",

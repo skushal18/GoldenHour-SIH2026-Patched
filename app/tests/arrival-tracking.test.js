@@ -18,11 +18,11 @@ const readModule = p => import('data:text/javascript;base64,'+fs.readFileSync(pa
  assert.deepEqual(cleared,['native-123']);
  let callback;const stopBrowser=watchPosition({native:false,geolocation:{watchPosition:f=>{callback=f;return 42;},clearWatch:id=>cleared.push(id)},onPosition:()=>updates++,onError:e=>{throw e;}});
  callback({});stopBrowser();callback({});assert.equal(updates,1);assert.equal(cleared[1],42);
- const {trackingView,trackSvg}=await readModule('../../backend/desk/src/tracking-view.js');
- const card={last_position:{lat:12,lng:77,at:new Date().toISOString()},live_eta_minutes:3,eta_minutes:8,eta_source:'live',tracking_hospital:{lat:12.01,lng:77.01}};
- assert.equal(trackingView(card).eta,'3 min (GPS estimate)');
- assert.equal(trackingView(card,Date.now()+31000).source,'stale');
- assert.equal(trackingView(card,Date.now()+31000).eta,'8 min (crew estimate)');
- assert.ok(trackSvg(card).includes('trail-hospital'));assert.ok(!trackSvg(card).includes('NaN'));
- console.log('PASS: arrival failure/timeout handling, native and browser watch cancellation, stale ETA and local GPS trail');
+ /* The crew token rides on both the socket event and the HTTP fallback. */
+ let sent=null, hdr=null;
+ await recordArrival({...opts,crewToken:'tok-123',socket:{connected:true,emit:(e,p,ack)=>{sent=p;ack({success:true});}}});
+ assert.equal(sent.crew_token,'tok-123');
+ await recordArrival({...opts,crewToken:'tok-123',fetch:async(u,o)=>{hdr=o.headers;return {ok:true,json:async()=>({success:true,status:'ARRIVED'})};}});
+ assert.equal(hdr['X-Crew-Token'],'tok-123');
+ console.log('PASS: arrival failure/timeout handling, crew token on socket and HTTP, native and browser watch cancellation');
 })().catch(e=>{console.error(e);process.exitCode=1;});

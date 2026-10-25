@@ -1132,3 +1132,15 @@ button:disabled:active{ transform: none; }
 
 .tracking-line { flex-wrap:wrap; }
 #trackingText { flex:1; min-width:180px; }
+
+/* ── v6: call-ahead list and delay sheet ─────────────────────────────── */
+.call-ahead { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; padding: 12px 14px; border-radius: 14px;
+  border: 1px solid var(--accent-line, #AE570F); background: var(--accent-wash, #FFF0DF); }
+.call-ahead-title { font-size: 15px; }
+.call-ahead-note { font-size: 13px; opacity: .85; }
+.call-ahead-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(0,0,0,.08); min-height: 44px; }
+.call-ahead-row:first-child { border-top: 0; }
+.call-ahead-row small { display: block; font-size: 12px; opacity: .8; }
+.call-ahead-row a { white-space: nowrap; font-weight: 600; min-height: 44px; display: inline-flex; align-items: center; }
+.delay-reasons { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.delay-reasons .chip[aria-checked="true"] { outline: 2px solid var(--brand-line, #00869A); font-weight: 600; }

@@ -5,7 +5,7 @@ name: Tests
 
 on:
   push:
-    branches: [main, master, testing, rebuild]
+    branches: [main, master, Patch-2, 'v6-*', testing, rebuild]
   pull_request:
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
       - run: node shared/design/contrast.check.js
 
   app:
-    name: Ambulance app · unit + config + location + functional
+    name: Ambulance app · unit + config + location + functional + ER desk
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +36,9 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # The app suite also loads the ER desk and the server's case list, so
+      # the backend's dependencies are installed too.
+      - run: npm --prefix backend ci
       - working-directory: app
         run: npm ci
       # `pretest` builds first, so the suites can never run against stale
@@ -44,7 +47,7 @@ jobs:
         run: npm test
 
   backend:
-    name: Backend · broadcast, desk auth, tracking, capacity, audit
+    name: Backend · sign-in, directory, broadcast, tracking, capacity, audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,23 +64,21 @@ jobs:
   built-output:
     name: Committed build output matches source
     runs-on: ubuntu-latest
-    # app/www and backend/public/hospital are committed artefacts: the APK
-    # workflow rewrites a file inside app/www, and `npm start` on a clean clone
-    # has to serve both front-ends with no build step. Committed output goes
-    # stale silently, so this job proves it did not.
+    # app/www is committed: the APK workflow rewrites a file inside it, and
+    # `npm start` on a clean clone serves it with no build step. Committed
+    # output goes stale silently, so this job proves it did not. (The ER desk
+    # in backend/public/hospital is hand-written and has no build step.)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: npm --prefix app ci
-      - run: npm --prefix backend ci
       - run: npm --prefix app run build
-      - run: npm --prefix backend run build:desk
       - name: Output must be committed
         run: |
-          if ! git diff --exit-code -- app/www backend/public/hospital; then
+          if ! git diff --exit-code -- app/www; then
             echo "::error::The committed build output is out of date."
-            echo "Run: npm --prefix app run build && npm --prefix backend run build:desk"
+            echo "Run: npm --prefix app run build"
             exit 1
           fi
 

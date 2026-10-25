@@ -3,110 +3,262 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#071C23">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="GoldenHour v5 — ER desk board.">
-<title>GoldenHour · ER Desk</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2325CED1'/%3E%3Cpath d='M22 50h13l7-14 11 24 7-10h18' fill='none' stroke='%23073B3C' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="dashboard.css">
+<meta name="description" content="GoldenHour — hospital ER desk and administration.">
+<meta name="robots" content="noindex">
+<title>GoldenHour · ER desk</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3Crect width='28' height='28' rx='7' fill='%2322C6DE'/%3E%3Cpath d='M14 7v14M7 14h14' stroke='%2304323A' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="desk.css">
 </head>
-<body>
+<body class="look-clinical">
 
-<!-- The wash the acrylic surfaces float over. -->
-<div class="ambient" aria-hidden="true"></div>
-<header class="deskbar acrylic">
-  <div class="deskbar-left">
-    <span class="mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 21s-7.5-4.7-7.5-10A4.5 4.5 0 0 1 12 8.4a4.5 4.5 0 0 1 7.5 2.6c0 5.3-7.5 10-7.5 10Z"/>
-        <path d="M9 12h1.6l1-2 1.6 3.4 1-1.4H16"/>
-      </svg>
-    </span>
-    <div class="identity-text">
-      <h1 id="hospitalName">ER Desk</h1>
-      <p id="hospitalMeta">connecting…</p>
+<!-- ═══════════════════════ Sign in ═══════════════════════ -->
+<div id="viewLogin" class="signin" hidden>
+  <aside class="signin-side">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>GoldenHour</div>
+    <div class="pitch">
+      <h1>Know who is coming before the ambulance arrives.</h1>
+      <p>Each hospital signs in to its own ER desk. You only ever see the cases offered to your hospital.</p>
     </div>
-  </div>
-  <div class="deskbar-strip" aria-label="ER capacity">
-    <div class="capacity"><span class="cap-label">Resus bays</span><button class="step step-down" data-step="resus" data-delta="-1">−</button><b id="capResus">3</b><button class="step step-up" data-step="resus" data-delta="1">+</button></div>
-    <div class="capacity"><span class="cap-label">Ventilators</span><button class="step step-down" data-step="vent"  data-delta="-1">−</button><b id="capVent">2</b><button class="step step-up" data-step="vent" data-delta="1">+</button></div>
-    <button class="toggle is-on" data-toggle="ct"><span class="t-dot"></span>CT</button>
-    <button class="toggle is-on" data-toggle="ot"><span class="t-dot"></span>OT</button>
-    <button class="toggle is-on" data-toggle="blood"><span class="t-dot"></span>Blood</button>
-    <button class="toggle is-on" data-toggle="cath"><span class="t-dot"></span>Cath-lab</button>
-    <button id="divertBtn" class="toggle" data-toggle="diversion"><span class="t-dot"></span>Divert</button>
-    <span class="updated" id="capUpdated">updated now</span>
-  </div>
-  <div class="deskbar-right">
-    <button type="button" class="icon-btn" id="soundToggle" aria-label="Sound">🔊</button>
-    <button type="button" class="icon-btn" id="analyticsBtn" aria-label="Response-time analytics" title="Response-time analytics">📊</button>
-  </div>
-</header>
-
-<div id="diversionBanner" class="diversion-band" hidden>
-  This desk is on diversion. Eligible to keep receiving broadcasts but flagged for charge nurse.
-</div>
-
-<div class="board">
-  <section class="column column-pending">
-    <div class="column-head">
-      <span class="eyebrow">Incoming</span>
-      <span class="count" id="cntPending">0</span>
-    </div>
-    <div class="column-sub"><span>Waiting for an answer</span></div>
-    <div id="pendingList" class="case-list" aria-live="polite"></div>
-  </section>
-
-  <section class="column column-active">
-    <div class="column-head">
-      <span class="eyebrow">Active cases</span>
-      <span class="count" id="cntActive">0</span>
-    </div>
-    <div class="column-sub"><span>Accepted · en route · watch the map</span></div>
-    <div id="activeList" class="case-list"></div>
-  </section>
-
-  <aside class="column column-side">
-    <div class="column-head"><span class="eyebrow">Network status</span><span class="count" id="cntHosp">0</span></div>
-    <div class="column-sub"><span>Every hospital in this broadcast</span></div>
-    <div id="netList" class="net-list"></div>
+    <span class="credit">Hospital directory: National Hospital Directory, Government of India (data.gov.in, GODL)</span>
   </aside>
+  <main class="signin-main">
+    <form id="loginForm" class="signin-card" novalidate>
+      <div>
+        <h2>Sign in to your ER desk</h2>
+        <p class="lede">Use the login your GoldenHour administrator gave your hospital.</p>
+      </div>
+      <label class="c-field">Username
+        <input id="loginUser" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      </label>
+      <label class="c-field">Password
+        <input id="loginPass" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <div id="loginError" class="c-alert c-alert-error" role="alert" hidden></div>
+      <button id="loginBtn" class="c-btn c-btn-primary" type="submit">Sign in</button>
+      <p class="signin-foot">Forgot it? Ask your GoldenHour administrator to reset it. A signed-in ER screen stays signed in for 12 hours.</p>
+    </form>
+  </main>
 </div>
 
-<!-- ── Print handover (hidden on screen) ─────────────────────────── -->
-<section id="handover" class="handover" hidden>
-  <h1>Patient handover</h1>
-  <div class="h-meta"></div>
-  <div class="h-vitals"></div>
-  <div class="h-note"></div>
-  <div class="h-footer"></div>
-</section>
+<!-- ═══════════════════════ Change password ═══════════════════════ -->
+<div id="viewPassword" class="signin" hidden>
+  <aside class="signin-side">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>GoldenHour</div>
+    <div class="pitch">
+      <h1>Set your own password.</h1>
+      <p>The password your administrator gave you was temporary. Choose one only your ER team knows.</p>
+    </div>
+    <span class="credit" id="pwHospital"></span>
+  </aside>
+  <main class="signin-main">
+    <form id="pwForm" class="signin-card" novalidate>
+      <div>
+        <h2>Choose a new password</h2>
+        <p class="lede" id="pwWho"></p>
+      </div>
+      <label class="c-field">Current (temporary) password
+        <input id="pwCurrent" type="password" autocomplete="current-password" required>
+      </label>
+      <label class="c-field">New password
+        <input id="pwNew" type="password" autocomplete="new-password" minlength="10" required>
+        <span class="c-hint">At least 10 characters. A short sentence is easiest to remember.</span>
+      </label>
+      <label class="c-field">New password again
+        <input id="pwAgain" type="password" autocomplete="new-password" required>
+      </label>
+      <div id="pwError" class="c-alert c-alert-error" role="alert" hidden></div>
+      <button id="pwBtn" class="c-btn c-btn-primary" type="submit">Save and continue</button>
+      <button id="pwSignOut" class="c-btn-link" type="button">Sign out instead</button>
+    </form>
+  </main>
+</div>
 
-<div id="analyticsPanel" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="analyticsTitle">
-  <div class="sheet">
-    <button type="button" class="sheet-x" data-close="analyticsPanel" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+<!-- ═══════════════════════ ER board ═══════════════════════ -->
+<div id="viewBoard" hidden>
+  <header class="deskbar glass">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>GoldenHour <small>ER desk</small></div>
+    <div class="who-hosp"><b id="hospName">—</b><span id="hospMeta"></span></div>
+    <div class="spacer"></div>
+    <span id="livePill" class="live-pill is-down" role="status"><i aria-hidden="true"></i><span id="liveText">Connecting…</span></span>
+    <button id="divertBtn" type="button" class="g-btn g-btn-divert" aria-pressed="false">Go on diversion</button>
+    <button id="soundBtn" type="button" class="icon-btn" aria-pressed="true" aria-label="New-case sound on" title="New-case sound">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path id="soundWaves" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
     </button>
-    <h2 id="analyticsTitle">Response times</h2>
-    <p class="sheet-sub" id="analyticsScope">This hospital</p>
-    <div id="analyticsBody" class="stat-grid"></div>
-    <p class="sheet-note" id="analyticsStore"></p>
-    <button type="button" class="btn-ghost" id="analyticsClose">Close</button>
+    <div class="acct">
+      <span class="avatar" id="acctInitials" aria-hidden="true">ER</span>
+      <div class="who"><span id="acctName"></span><button id="signOutBtn" type="button">Sign out</button></div>
+    </div>
+  </header>
+  <div id="diversionBand" class="diversion-band" hidden>Your hospital is on diversion. Ambulances still see your cases, flagged so their crews can choose elsewhere.</div>
+
+  <div class="board">
+    <main class="board-main">
+      <section aria-labelledby="hIncoming">
+        <div class="section-head"><h2 id="hIncoming">Incoming</h2><span class="count" id="cntPending">0</span><span class="note">First hospital to accept takes the patient</span></div>
+        <div id="pendingList" class="case-list" aria-live="polite"></div>
+      </section>
+      <section aria-labelledby="hEnroute">
+        <div class="section-head"><h2 id="hEnroute">En route to us</h2><span class="count" id="cntActive">0</span></div>
+        <div id="activeList" class="case-list" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <aside class="board-side">
+      <section class="side-panel glass" aria-labelledby="hCap">
+        <div class="head"><h2 id="hCap">Our capacity</h2><span id="capUpdated">not reported yet</span></div>
+        <div class="steppers">
+          <div class="stepper" data-cap="resus_bays_available"><span class="k">Resus bays</span><div class="row"><button type="button" data-delta="-1" aria-label="One fewer resus bay">−</button><b>0</b><button type="button" data-delta="1" aria-label="One more resus bay">+</button></div></div>
+          <div class="stepper" data-cap="ventilators_available"><span class="k">Ventilators</span><div class="row"><button type="button" data-delta="-1" aria-label="One fewer ventilator">−</button><b>0</b><button type="button" data-delta="1" aria-label="One more ventilator">+</button></div></div>
+        </div>
+        <div class="toggles">
+          <button type="button" class="toggle" data-flag="ct_available" aria-pressed="true"><i aria-hidden="true"></i>CT</button>
+          <button type="button" class="toggle" data-flag="ot_available" aria-pressed="true"><i aria-hidden="true"></i>Theatre</button>
+          <button type="button" class="toggle" data-flag="blood_available" aria-pressed="true"><i aria-hidden="true"></i>Blood</button>
+          <button type="button" class="toggle" data-flag="cathlab_available" aria-pressed="true"><i aria-hidden="true"></i>Cath lab</button>
+        </div>
+        <p class="fine">Crews and other desks see this. Keep it current — a stale strip is marked stale after an hour.</p>
+      </section>
+
+      <section class="side-panel glass" aria-labelledby="hNear">
+        <div class="head"><h2 id="hNear">Nearby hospitals</h2><span>within 5 km</span></div>
+        <div id="nearList"><div class="map-readout">Loading…</div></div>
+        <p class="fine">From the national hospital directory. Locations marked ≈ are pincode estimates.</p>
+      </section>
+
+      <section class="side-panel glass" aria-labelledby="hToday">
+        <div class="head"><h2 id="hToday">Our numbers</h2><span id="storeNote"></span></div>
+        <div class="today">
+          <div><b id="tAccepted">—</b><span>accepted</span></div>
+          <div><b id="tArrived">—</b><span>arrived</span></div>
+          <div><b id="tMedian">—</b><span>median to accept</span></div>
+        </div>
+        <button id="historyBtn" type="button" class="g-btn">Recent cases</button>
+      </section>
+    </aside>
   </div>
 </div>
 
-<div id="lightbox" class="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo">
-  <img id="lightboxImg" alt="Photograph attached to this case">
-  <button type="button" class="sheet-x lightbox-x" data-close="lightbox" id="lightboxClose" aria-label="Close">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-  </button>
+<!-- ═══════════════════════ Admin console ═══════════════════════ -->
+<div id="viewAdmin" hidden>
+  <header class="adminbar">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>GoldenHour <small>Administration</small></div>
+    <nav class="adminnav" aria-label="Administration">
+      <button type="button" data-tab="accounts" aria-current="page">Hospital accounts</button>
+      <button type="button" data-tab="directory">Directory</button>
+      <button type="button" data-tab="live">Live cases</button>
+      <button type="button" data-tab="audit">Audit log</button>
+    </nav>
+    <div class="who"><span id="adminName"></span> · <button id="adminSignOut" type="button">Sign out</button></div>
+  </header>
+
+  <div class="admin-wrap">
+    <main class="admin-main">
+      <!-- accounts -->
+      <section data-pane="accounts">
+        <div class="admin-head">
+          <div class="title"><h1>Hospital accounts</h1><p>Each login opens one hospital's ER desk and nothing else.</p></div>
+          <label class="c-field">Search<input id="accSearch" type="search" placeholder="Hospital, username, district"></label>
+          <label class="c-field">State<select id="accState"><option value="">All states</option></select></label>
+        </div>
+        <div class="panel table-box" style="margin-top:16px">
+          <table class="table">
+            <thead><tr><th>Hospital</th><th>Username</th><th>Status</th><th>Last sign-in</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="accRows"><tr><td colspan="5" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- directory -->
+      <section data-pane="directory" hidden>
+        <div class="admin-head">
+          <div class="title"><h1>Hospital directory</h1><p>All-India list from the Government's National Hospital Directory.</p></div>
+          <label class="c-field">Search<input id="dirSearch" type="search" placeholder="Name, district or pincode"></label>
+          <label class="c-field">State<select id="dirState"><option value="">All states</option></select></label>
+        </div>
+        <div class="panel table-box" style="margin-top:16px">
+          <table class="table">
+            <thead><tr><th>Hospital</th><th>Type</th><th>Location</th><th>Phone</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="dirRows"><tr><td colspan="5" class="table-empty">Search to see hospitals.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- live -->
+      <section data-pane="live" hidden>
+        <div class="admin-head"><div class="title"><h1>Live cases</h1><p>The last 100 broadcasts across the network. Patient details stay with the hospitals.</p></div>
+          <button id="liveRefresh" type="button" class="c-btn c-btn-quiet">Refresh</button></div>
+        <div class="panel table-box" style="margin-top:16px">
+          <table class="table">
+            <thead><tr><th>Case</th><th>Status</th><th>Priority</th><th>Hospitals offered</th><th>Accepted by</th><th>Created</th></tr></thead>
+            <tbody id="liveRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- audit -->
+      <section data-pane="audit" hidden>
+        <div class="admin-head"><div class="title"><h1>Audit log</h1><p>Sign-ins and account changes, newest first.</p></div>
+          <button id="auditRefresh" type="button" class="c-btn c-btn-quiet">Refresh</button></div>
+        <div class="panel table-box" style="margin-top:16px">
+          <table class="table">
+            <thead><tr><th>When</th><th>Event</th><th>Details</th></tr></thead>
+            <tbody id="auditRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <aside class="admin-side">
+      <form id="createForm" class="panel panel-pad" novalidate>
+        <h2>Create a hospital login</h2>
+        <div class="c-field picker">Hospital
+          <input id="createHospital" type="search" autocomplete="off" placeholder="Search the national directory" aria-describedby="createHospitalHint" aria-autocomplete="list" aria-controls="createPicker">
+          <div id="createPicker" class="picker-list" role="listbox" hidden></div>
+          <span id="createHospitalHint" class="c-hint">Pick a hospital from the list.</span>
+        </div>
+        <label class="c-field">Username
+          <input id="createUser" type="text" autocapitalize="none" spellcheck="false" placeholder="Suggested when you pick a hospital">
+          <span class="c-hint">Lower-case letters, digits, dot, dash or underscore.</span>
+        </label>
+        <div id="createError" class="c-alert c-alert-error" role="alert" hidden></div>
+        <div id="createResult" hidden>
+          <div class="c-alert c-alert-ok" role="status" id="createResultText"></div>
+          <div class="c-field" style="margin-top:10px">Temporary password
+            <div class="secret"><code id="createSecret"></code><button type="button" class="c-btn-link" id="copySecret">Copy</button></div>
+            <span class="c-hint">Shown once. Give it to the hospital privately; they must change it at first sign-in.</span>
+          </div>
+        </div>
+        <button id="createBtn" class="c-btn c-btn-primary" type="submit">Create login</button>
+      </form>
+
+      <section class="panel panel-pad" aria-labelledby="hCoverage">
+        <h2 id="hCoverage">Directory coverage</h2>
+        <div id="coverage"><div class="kv"><span>Loading…</span></div></div>
+      </section>
+    </aside>
+  </div>
 </div>
 
-<div id="toast" class="toast" hidden role="status"></div>
+<!-- shared overlays -->
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="lightbox" class="lightbox" hidden><button type="button" class="close" id="lightboxClose" aria-label="Close photo">×</button><img id="lightboxImg" alt=""></div>
+<div id="sheetBack" class="sheet-back" hidden>
+  <div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <button type="button" class="icon-btn close" id="sheetClose" aria-label="Close">×</button>
+    <h2 id="sheetTitle"></h2>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+<div id="handover"></div>
 
-<!-- One vendored socket.io client, served by the backend at /vendor to both front-ends. -->
-<script src="/vendor/socket.io.min.js"></script>
 <script src="config.js"></script>
-<script src="dashboard.js"></script>
+<script src="/vendor/socket.io.min.js"></script>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="common.js"></script>
+<script src="board.js"></script>
+<script src="admin.js"></script>
+<script src="main.js"></script>
 </body>
 </html>

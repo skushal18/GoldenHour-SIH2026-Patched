@@ -18,13 +18,19 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const security = require('./config/security');
 const hospitalsConfig = require('./config/hospitals');
-const { initStore, getStore } = require('./store');
+const { initStore, getStore, getPool } = require('./store');
+const directory = require('./services/directoryService');
+const authService = require('./services/authService');
+const capacity = require('./services/capacityService');
+const audit = require('./services/auditService');
 const socketHandler = require('./sockets/socketHandler');
 const { startExpiryLoop } = require('./services/broadcastService');
 const { securityHeaders, notFound, errorHandler } = require('./middleware/protect');
 
 const requestRoutes = require('./routes/requestRoutes');
 const hospitalDeskRoutes = require('./routes/hospitalDeskRoutes');
+const authRoutes = require('./routes/authRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 /* Refuses to continue on an unsafe production configuration. Everything below
    can then assume the environment is sane. A stack trace would only bury the
@@ -76,24 +82,20 @@ app.set('io', io);
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const APP_DIR = path.join(__dirname, '..', '..', 'app', 'www');
 
+/* /hospital is the ER desk and /admin the administrator console: the same
+   single-page app, which shows whichever screen the signed-in account may
+   use. Neither shows anything before sign-in. */
 app.use('/hospital', express.static(path.join(PUBLIC_DIR, 'hospital')));
+app.use('/admin', express.static(path.join(PUBLIC_DIR, 'hospital')));
 app.use('/ambulance', express.static(APP_DIR));
 app.use('/', express.static(path.join(PUBLIC_DIR, 'landing')));
-/* One vendored socket.io client, served to both front-ends. */
+/* Vendored client libraries: socket.io (shared with the ambulance app) and Leaflet. */
 app.use('/vendor', express.static(path.join(APP_DIR, 'vendor')));
+app.use('/vendor', express.static(path.join(PUBLIC_DIR, 'vendor')));
 
 /* ── API ───────────────────────────────────────────────────────────────── */
-/* Sign-in is deliberately NOT mounted.
-   There is no login screen in either front-end and the demo does not need
-   one: desks identify by ?hospital=<id> under DESK_AUTH=ip, and under
-   DESK_AUTH=jwt the token is verified here but issued elsewhere. The handlers
-   still exist, hardened, in routes/authRoutes.js and
-   controllers/authController.js — mounting them again is this one line:
-
-       app.use('/api/v1/auth', require('./routes/authRoutes'));
-
-   Leaving an unused public endpoint that mints ER-desk tokens exposed is not
-   worth it until something actually calls it. */
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/desk', hospitalDeskRoutes);
 app.use('/api/v1', requestRoutes);
 
@@ -115,14 +117,16 @@ app.get('/health', async (req, res) => {
   const body = {
     success: storeHealthy,
     message: 'GoldenHour backend',
+    version: require('../package.json').version,
     env: security.envName(),
     store,
     store_healthy: storeHealthy,
     desk_auth: security.deskAuthMode(),
     hackathon_mode: hospitalsConfig.HACKATHON_MODE,
+    directory_hospitals: directory.count(),
     uptime_seconds: Math.round(process.uptime()),
   };
-  if (hospitalsConfig.HACKATHON_MODE) {
+  if (hospitalsConfig.HACKATHON_MODE && security.deskAuthMode() === 'ip') {
     body.laptops = hospitalsConfig.HOSPITAL_LAPTOPS.map(h => ({ id: h.hospital_id, name: h.name, ip: h.ip }));
   }
   res.status(storeHealthy ? 200 : 503).json(body);
@@ -137,7 +141,16 @@ const PORT = Number(process.env.PORT) || 5000;
 
 (async () => {
   try {
+    const loaded = directory.load();
+    console.log('🏥 Hospital directory: ' + loaded.toLocaleString('en-IN') + ' hospitals');
     await initStore();
+    const pool = getPool();
+    if (pool) {
+      const caps = await capacity.attachPersistence(pool);
+      const evts = await audit.attachPersistence(pool);
+      console.log('🗃️  Restored ' + caps + ' capacity records and ' + evts + ' case events');
+    }
+    await authService.bootstrap(console);
     startExpiryLoop(io, 10000);
     server.listen(PORT, '0.0.0.0', () => {
       console.log('🚑 GoldenHour listening on :' + PORT +

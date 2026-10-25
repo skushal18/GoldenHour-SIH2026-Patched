@@ -8,7 +8,9 @@
 
    Deliberately minimal: case code, type, age band, sex, status, timestamps.
    No name, no address, no free-text notes. A stolen phone should not be a
-   patient-data incident.
+   patient-data incident. Each entry does keep its case's crew token, the
+   secret that lets this phone (and only this phone) update, track and close
+   the case after an app restart; it expires with the case's usefulness.
    ========================================================================== */
 
 export const CASES_KEY = 'goldenhour.cases';

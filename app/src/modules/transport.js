@@ -62,9 +62,11 @@ export function createLiveTransport(apiRoot, fetchImpl) {
       return body;
     },
 
-    async status(caseCode) {
+    /* The crew token returned by broadcast() is what opens the case: case
+       codes are sequential, so the code alone must not reveal a patient. */
+    async status(caseCode, crewToken) {
       let res;
-      try { res = await doFetch(url('/requests/' + encodeURIComponent(caseCode))); }
+      try { res = await doFetch(url('/requests/' + encodeURIComponent(caseCode)), { headers: { 'X-Crew-Token': crewToken || '' } }); }
       catch (err) { throw new NetworkError(err && err.message); }
       if (!res.ok) throw new RejectedError('HTTP ' + res.status, res.status);
       return await res.json();
@@ -97,6 +99,7 @@ export function createDemoTransport(options) {
       cases.set(id, { id, created: now, payload });
       return {
         id,
+        crew_token: 'demo-' + id,
         status: 'PENDING',
         hospitals_notified: DEMO_HOSPITALS_NOTIFIED,
         expires_at: new Date(now + 180000).toISOString(),

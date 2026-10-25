@@ -30,11 +30,11 @@ function isProduction() {
 }
 
 function deskAuthMode() {
+  /* v6: every hospital signs in. The old IP / ?hospital=<id> identity is
+     available only when asked for by name (DESK_AUTH=ip), for a closed LAN
+     rehearsal, and production refuses it. */
   const explicit = String(process.env.DESK_AUTH || '').toLowerCase();
-  if (explicit) return explicit;
-  /* Unset means "whatever is safe here": IP/override identity for the LAN
-     demo, real tokens in production. */
-  return isProduction() ? 'jwt' : 'ip';
+  return explicit === 'ip' ? 'ip' : 'jwt';
 }
 
 function corsOrigins() {
@@ -94,8 +94,10 @@ function audit() {
        that this instance matters, and that is where the gate belongs. */
     if (prod) {
       fatal.push(secretProblem + '. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'base64url\'))"');
-    } else if (mode === 'jwt') {
+    } else if (mode === 'jwt' && jwtSecret()) {
       warnings.push(secretProblem + '. Acceptable here, never in a deployment — set NODE_ENV=production and this becomes a refusal to start.');
+    } else if (mode === 'jwt') {
+      warnings.push('JWT_SECRET is not set: using a random secret for this run, so every desk is signed out when the server restarts.');
     }
   }
 

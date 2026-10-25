@@ -9,14 +9,17 @@
      - audit hook on every state transition
    ========================================================================== */
 'use strict';
+const crypto = require('crypto');
 const tracking = require('./trackingService');
 const hospitalsConfig = require('../config/hospitals');
-const { getStore } = require('../store');
+const security = require('../config/security');
+const { getStore, getAccounts } = require('../store');
 const { CASE_TYPES, labelFor, categoryFor } = require('../data/caseTypes');
 const { haversine, roundKm, computePriority, criticalFlags } = require('./triage');
 const capacity = require('./capacityService');
 const match = require('./matchService');
 const audit = require('./auditService');
+const directory = require('./directoryService');
 
 const num = v => (v === null || v === undefined || v === '' || isNaN(Number(v)) ? null : Number(v));
 const text = v => {
@@ -25,35 +28,71 @@ const text = v => {
   return s === '' ? null : s;
 };
 
-/* ── Targets ─────────────────────────────────────────────────────────── */
-async function hospitalsFromDatabase() {
-  try {
-    const pool = require('../config/db');
-    const [rows] = await pool.query(
-      'SELECT hospital_id, name, latitude, longitude, contact FROM hospitals WHERE latitude IS NOT NULL AND longitude IS NOT NULL'
-    );
-    return rows.map(r => ({
-      hospital_id: r.hospital_id, name: r.name, contact: r.contact,
-      lat: Number(r.latitude), lng: Number(r.longitude),
-    }));
-  } catch (err) {
-    console.warn('⚠️  hospital lookup fell back to the hardcoded list:', err.message);
-    return hospitalsConfig.HOSPITAL_LAPTOPS.slice();
-  }
+/* ── Crew tokens ─────────────────────────────────────────────────────────
+   Case codes are sequential (GH-2026-0001, -0002 …), so a code alone is not a
+   secret. Every broadcast mints a random crew token, returned once to the
+   ambulance that created it; reading the patient details, editing them,
+   sharing GPS, reporting a delay, cancelling and closing the case all
+   require it. Only its SHA-256 is stored. */
+function newCrewToken() { return crypto.randomBytes(24).toString('base64url'); }
+function hashToken(t) { return crypto.createHash('sha256').update(String(t)).digest('hex'); }
+function crewTokenValid(record, token) {
+  if (!record || !record.crew_token_hash || !token) return false;
+  const a = Buffer.from(hashToken(token), 'hex');
+  const b = Buffer.from(String(record.crew_token_hash), 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/* ── Targets ─────────────────────────────────────────────────────────────
+   Only hospitals with an active GoldenHour login can receive and accept a
+   case, so those are the targets. The rest of the national directory still
+   matters: the nearest hospitals that are NOT on GoldenHour are returned to
+   the crew as "call ahead" options, with their phone numbers.
+
+   HACKATHON_MODE: every hospital with a login is alerted regardless of
+   distance, so a demo does not depend on where the venue is.
+   DESK_AUTH=ip (LAN rehearsal): the two hardcoded demo laptops, as before. */
+function targetFrom(h, lat, lng) {
+  return {
+    hospital_id: h.hospital_id, name: h.name, contact: h.contact || null,
+    lat: h.lat === undefined ? null : h.lat, lng: h.lng === undefined ? null : h.lng,
+    distance_km: roundKm(haversine(lat, lng, h.lat, h.lng)), status: 'PENDING',
+    coord_source: h.coord_source || null,
+  };
 }
 
 async function resolveTargets(origin, radiusKm) {
   const lat = origin ? num(origin.lat) : null;
   const lng = origin ? num(origin.lng) : null;
-  const withDistance = h => ({
-    hospital_id: h.hospital_id, name: h.name, contact: h.contact || null,
-    lat: h.lat === undefined ? null : h.lat, lng: h.lng === undefined ? null : h.lng,
-    distance_km: roundKm(haversine(lat, lng, h.lat, h.lng)), status: 'PENDING',
-  });
-  if (hospitalsConfig.HACKATHON_MODE) return hospitalsConfig.HOSPITAL_LAPTOPS.map(withDistance);
-  const all = (await hospitalsFromDatabase()).map(withDistance);
   const radius = num(radiusKm) || 15;
-  return all.filter(h => h.distance_km !== null && h.distance_km <= radius).sort((a,b)=>a.distance_km - b.distance_km);
+
+  if (security.deskAuthMode() !== 'jwt') {
+    const laptops = hospitalsConfig.HOSPITAL_LAPTOPS.map(h => targetFrom(h, lat, lng));
+    if (hospitalsConfig.HACKATHON_MODE) return laptops;
+    return laptops.filter(h => h.distance_km !== null && h.distance_km <= radius);
+  }
+
+  const ids = await getAccounts().activeHospitalIds();
+  const onBoard = ids.map(id => directory.get(id)).filter(Boolean).map(h => targetFrom(h, lat, lng));
+  const sorted = onBoard.sort((a, b) => (a.distance_km == null ? 1e9 : a.distance_km) - (b.distance_km == null ? 1e9 : b.distance_km));
+  if (hospitalsConfig.HACKATHON_MODE) return sorted;
+  return sorted.filter(h => h.distance_km !== null && h.distance_km <= radius);
+}
+
+/** Nearest emergency-capable hospitals that have no GoldenHour login. */
+async function callAheadOptions(origin, radiusKm, excludeIds) {
+  const lat = origin ? num(origin.lat) : null;
+  const lng = origin ? num(origin.lng) : null;
+  if (lat === null || lng === null) return [];
+  const exclude = new Set(excludeIds || []);
+  try {
+    const onBoard = new Set(await getAccounts().activeHospitalIds());
+    return directory.nearby(lat, lng, Math.max(num(radiusKm) || 15, 10), {
+      emergencyOnly: true, limit: 5,
+      filter: h => !onBoard.has(h.hospital_id) && !exclude.has(h.hospital_id) && !!h.contact,
+    }).map(h => ({ hospital_id: h.hospital_id, name: h.name, distance_km: h.distance_km, phone: h.contact,
+      lat: h.lat, lng: h.lng, district: h.district, location_quality: h.coord_source === 'listed' ? 'listed' : 'approximate' }));
+  } catch (_) { return []; }
 }
 
 /* ── Shapes ─────────────────────────────────────────────────────────── */
@@ -119,6 +158,10 @@ function toAmbulanceStatus(record) {
       phone: winner.contact || null, lat: winner.lat, lng: winner.lng,
     };
   }
+  if (Array.isArray(record.call_ahead) && record.call_ahead.length &&
+      (record.status !== 'ACCEPTED' && record.status !== 'ARRIVED')) {
+    body.call_ahead = record.call_ahead;
+  }
   if (record.status === 'ACCEPTED' || record.status === 'ARRIVED') {
     body.patient = record.patient || null;
     body.notes = record.notes || null;
@@ -139,12 +182,16 @@ async function createBroadcast(body, io) {
   const vitals = payload.vitals || {};
   const priority = computePriority(vitals, payload.consciousness, payload.case_type_id);
   const targets = await resolveTargets(payload.origin, payload.broadcast_radius_km);
-  const caseCode = await store.nextCaseCode();
+  const callAhead = await callAheadOptions(payload.origin, payload.broadcast_radius_km, targets.map(t => t.hospital_id));
+  const crewToken = newCrewToken();
   const createdAt = new Date();
-  const expiresAt = new Date(createdAt.getTime() + hospitalsConfig.ACCEPT_WINDOW_SECONDS * 1000);
+  /* Nobody on GoldenHour within range: expire at once, so the crew is told
+     within one expiry tick and sees the call-ahead list, instead of waiting
+     three minutes on a case no desk can see. */
+  const expiresAt = new Date(createdAt.getTime() + (targets.length ? hospitalsConfig.ACCEPT_WINDOW_SECONDS * 1000 : 0));
 
   const record = {
-    case_code: caseCode, case_id: null, status: 'PENDING', priority,
+    case_code: null, case_id: null, status: 'PENDING', priority,
     created_at: createdAt.toISOString(), expires_at: expiresAt.toISOString(),
     accepted_hospital_id: null, accepted_at: null, arrived_at: null,
     case_type_id: num(payload.case_type_id),
@@ -176,9 +223,22 @@ async function createBroadcast(body, io) {
     /* v5 */
     track: [], last_position: null, live_eta_minutes: null, eta_source: 'crew',
     patient_history: [],
-    resources: payload.resources || null,    // initial crew overrides
+    crew_token_hash: hashToken(crewToken),
+    call_ahead: callAhead,
   };
-  await store.insertBroadcast(record);
+  /* Two simultaneous broadcasts can be handed the same next code by a
+     count-based allocator; the primary key rejects the second, so take the
+     next code and try again rather than failing an emergency with a 500. */
+  let caseCode = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    caseCode = await store.nextCaseCode();
+    record.case_code = caseCode;
+    try { await store.insertBroadcast(record); break; }
+    catch (err) {
+      if (err && err.code === 'ER_DUP_ENTRY' && attempt < 4) continue;
+      throw err;
+    }
+  }
 
   audit.record(caseCode, 'BROADCAST_CREATED', {
     priority, case_category: record.case_category, targets: targets.length,
@@ -188,8 +248,9 @@ async function createBroadcast(body, io) {
   if (io) {
     for (const t of targets) io.to(`hospital_${t.hospital_id}`).emit('broadcast:new', toDashboardCard(record, t.hospital_id));
   }
-  console.log(`📡 ${caseCode} ${priority} "${record.chief_complaint}" → ${targets.map(t => `#${t.hospital_id} ${t.name}`).join(' + ')}`);
-  return record;
+  console.log(`📡 ${caseCode} ${priority} "${record.chief_complaint}" → ${targets.length ? targets.map(t => `#${t.hospital_id} ${t.name}`).join(' + ') : 'no hospital on GoldenHour in range'}`);
+  /* A copy: the stored record keeps only the hash, never the token itself. */
+  return Object.assign({}, record, { crew_token: crewToken });
 }
 
 /* ── Accept ─────────────────────────────────────────────────────────── */
@@ -425,6 +486,7 @@ function startExpiryLoop(io, intervalMs) {
 }
 
 module.exports = {
+  crewTokenValid, hashToken, callAheadOptions,
   CASE_TYPES, createBroadcast, acceptBroadcast, declineBroadcast, cancelBroadcast,
   updatePatient, markArrived, resolveTargets, toDashboardCard, toAmbulanceStatus,
   lifecycleFor, startExpiryLoop,

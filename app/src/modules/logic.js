@@ -160,44 +160,49 @@ export function buildPayload(form) {
 }
 
 /* ── Reference data ─────────────────────────────────────────────────────────
-   Mirrors backend/src/data/caseTypes.js. Bundled so the APK can show a
-   usable form with no server at all — a dead zone must not mean a blank
-   dropdown. The server's list wins whenever one can be fetched. */
+   An exact copy of backend/src/data/caseTypes.js — same ids, same labels,
+   same categories — bundled so the APK can show a usable form with no
+   server at all. It MUST stay identical: a case is sent by id, so a list
+   that drifts sends one emergency and the hospital reads another (the v5
+   copy had different ids from 4 onwards — "Eclampsia" arrived as "Heat
+   stroke"). app/tests/test.js fails the build if the two lists differ, and
+   the server refuses an id it does not know. The server's list wins
+   whenever one can be fetched. */
 
 export const DEMO_CASE_TYPES = [
-  { id: 1,  category: 'TRAUMA',    label: 'Road accident — multiple injuries', quick: true, short: 'Road accident' },
-  { id: 2,  category: 'TRAUMA',    label: 'Head injury',                       quick: true, short: 'Head injury' },
-  { id: 3,  category: 'TRAUMA',    label: 'Fall from height' },
-  { id: 4,  category: 'TRAUMA',    label: 'Crush injury / amputation' },
-  { id: 5,  category: 'TRAUMA',    label: 'Penetrating injury / stabbing' },
-  { id: 6,  category: 'TRAUMA',    label: 'Major burns' },
-  { id: 7,  category: 'TRAUMA',    label: 'Spinal injury suspected' },
-  { id: 8,  category: 'CARDIAC',   label: 'Chest pain — suspected heart attack', quick: true, short: 'Chest pain' },
-  { id: 9,  category: 'CARDIAC',   label: 'Cardiac arrest',                    quick: true, short: 'Cardiac arrest' },
-  { id: 10, category: 'CARDIAC',   label: 'Irregular heartbeat / palpitations' },
-  { id: 11, category: 'CARDIAC',   label: 'Heart failure / severe swelling' },
-  { id: 12, category: 'STROKE',    label: 'Stroke — sudden weakness or slurred speech', quick: true, short: 'Stroke' },
-  { id: 13, category: 'STROKE',    label: 'Transient ischaemic attack' },
-  { id: 14, category: 'NEURO',     label: 'Seizure / fitting' },
-  { id: 15, category: 'NEURO',     label: 'Unresponsive — cause unknown' },
-  { id: 16, category: 'RESP',      label: 'Severe breathlessness',             quick: true, short: 'Breathless' },
-  { id: 17, category: 'RESP',      label: 'Asthma attack' },
-  { id: 18, category: 'RESP',      label: 'Choking / airway obstruction' },
-  { id: 19, category: 'RESP',      label: 'Drowning / near-drowning' },
-  { id: 20, category: 'OBSTETRIC', label: 'Labour / imminent delivery' },
-  { id: 21, category: 'OBSTETRIC', label: 'Pregnancy complication / bleeding' },
-  { id: 22, category: 'OBSTETRIC', label: 'Eclampsia / seizure in pregnancy' },
-  { id: 23, category: 'PAEDIATRIC',label: 'Child — serious illness' },
-  { id: 24, category: 'PAEDIATRIC',label: 'Child — injury' },
-  { id: 25, category: 'PAEDIATRIC',label: 'Newborn in distress' },
-  { id: 26, category: 'TOXIC',     label: 'Poisoning / overdose' },
-  { id: 27, category: 'TOXIC',     label: 'Snake or animal bite' },
-  { id: 28, category: 'TOXIC',     label: 'Severe allergic reaction' },
-  { id: 29, category: 'TOXIC',     label: 'Smoke or gas inhalation' },
-  { id: 30, category: 'MEDICAL',   label: 'Diabetic emergency' },
-  { id: 31, category: 'MEDICAL',   label: 'Heavy bleeding — non-trauma' },
-  { id: 32, category: 'MEDICAL',   label: 'Severe abdominal pain' },
-  { id: 33, category: 'MEDICAL',   label: 'Severe infection / sepsis suspected' },
+  { id: 1, category: 'TRAUMA', label: 'Road accident — multiple injuries', quick: true, short: 'Road accident' },
+  { id: 2, category: 'TRAUMA', label: 'Head injury', quick: true, short: 'Head injury' },
+  { id: 3, category: 'TRAUMA', label: 'Fall from height' },
+  { id: 4, category: 'TRAUMA', label: 'Stab / gunshot / penetrating wound' },
+  { id: 5, category: 'TRAUMA', label: 'Major burns' },
+  { id: 6, category: 'TRAUMA', label: 'Crush injury / amputation' },
+  { id: 7, category: 'TRAUMA', label: 'Suspected spinal injury' },
+  { id: 8, category: 'CARDIAC', label: 'Chest pain / suspected heart attack', quick: true, short: 'Chest pain' },
+  { id: 9, category: 'CARDIAC', label: 'Cardiac arrest — CPR in progress', quick: true, short: 'Cardiac arrest' },
+  { id: 10, category: 'CARDIAC', label: 'Irregular heartbeat / arrhythmia' },
+  { id: 11, category: 'CARDIAC', label: 'Heart failure / fluid in lungs' },
+  { id: 12, category: 'STROKE', label: 'Stroke / sudden weakness or slurred speech', quick: true, short: 'Stroke' },
+  { id: 13, category: 'STROKE', label: 'Suspected TIA' },
+  { id: 14, category: 'NEURO', label: 'Seizure / fits' },
+  { id: 15, category: 'NEURO', label: 'Unresponsive — cause unknown' },
+  { id: 16, category: 'RESP', label: 'Severe breathlessness / asthma attack', quick: true, short: 'Breathless' },
+  { id: 17, category: 'RESP', label: 'COPD flare-up' },
+  { id: 18, category: 'RESP', label: 'Choking / blocked airway' },
+  { id: 19, category: 'RESP', label: 'Drowning' },
+  { id: 20, category: 'METABOLIC', label: 'Low blood sugar' },
+  { id: 21, category: 'METABOLIC', label: 'High blood sugar / DKA' },
+  { id: 22, category: 'METABOLIC', label: 'Heat stroke' },
+  { id: 23, category: 'OBSTETRIC', label: 'Labour / delivery imminent' },
+  { id: 24, category: 'OBSTETRIC', label: 'Pregnancy emergency' },
+  { id: 25, category: 'OBSTETRIC', label: 'Newborn in distress' },
+  { id: 26, category: 'PAEDIATRIC', label: 'Sick child' },
+  { id: 27, category: 'PAEDIATRIC', label: 'Injured child' },
+  { id: 28, category: 'POISONING', label: 'Poisoning / overdose' },
+  { id: 29, category: 'POISONING', label: 'Snake bite / animal bite' },
+  { id: 30, category: 'ALLERGY', label: 'Severe allergic reaction (anaphylaxis)' },
+  { id: 31, category: 'OTHER', label: 'Heavy bleeding (not from injury)' },
+  { id: 32, category: 'OTHER', label: 'Psychiatric emergency' },
+  { id: 33, category: 'OTHER', label: 'Other emergency' },
 ];
 
 /* Order matters: the group a crew reaches for most often is first. */
@@ -207,10 +212,12 @@ export const CATEGORY_LABELS = [
   ['STROKE',     'Stroke'],
   ['NEURO',      'Neurological'],
   ['RESP',       'Breathing & airway'],
+  ['METABOLIC',  'Sugar, heat & metabolic'],
   ['OBSTETRIC',  'Pregnancy & birth'],
   ['PAEDIATRIC', 'Children'],
-  ['TOXIC',      'Poisoning & bites'],
-  ['MEDICAL',    'Other medical'],
+  ['POISONING',  'Poisoning & bites'],
+  ['ALLERGY',    'Allergy'],
+  ['OTHER',      'Other emergencies'],
 ];
 
 export function categoryOf(caseTypes, id) {

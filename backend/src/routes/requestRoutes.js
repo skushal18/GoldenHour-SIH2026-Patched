@@ -19,7 +19,7 @@ const express = require('express');
 const router = express.Router();
 
 const { CASE_TYPES } = require('../data/caseTypes');
-const { createBroadcast, cancelBroadcast, markArrived, toAmbulanceStatus } = require('../services/broadcastService');
+const { createBroadcast, cancelBroadcast, markArrived, toAmbulanceStatus, crewTokenValid } = require('../services/broadcastService');
 const { getStore } = require('../store');
 const { validateBroadcast } = require('../services/validation');
 const { createRateLimiter } = require('../middleware/protect');
@@ -56,10 +56,12 @@ router.post('/requests', broadcastLimiter, async (req, res, next) => {
          difference and so can anybody reading the access log. */
       return res.status(200).json({
         id: entry.case_code,
+        crew_token: entry.crew_token,
         hospitals_notified: record ? record.targets.length : 0,
         status: record && record.status,
         priority: record && record.priority,
         expires_at: record && record.expires_at,
+        call_ahead: (record && record.call_ahead) || [],
         idempotent_replay: true,
       });
     }
@@ -73,29 +75,48 @@ router.post('/requests', broadcastLimiter, async (req, res, next) => {
 
   try {
     const record = await createBroadcast(body, req.app.get('io'));
-    if (crid) idemMap.set(crid, { case_code: record.case_code, expires: Date.now() + IDEM_TTL });
+    /* The replay entry keeps the crew token so a retried POST (offline
+       outbox, double flush) hands the same ambulance the same token. It
+       lives only in process memory, for REQUEST_IDEMPOTENCY_TTL_MS. */
+    if (crid) idemMap.set(crid, { case_code: record.case_code, crew_token: record.crew_token, expires: Date.now() + IDEM_TTL });
     res.status(201).json({
       id: record.case_code,
+      crew_token: record.crew_token,
       hospitals_notified: record.targets.length,
       status: record.status,
       priority: record.priority,
       expires_at: record.expires_at,
+      call_ahead: record.call_ahead || [],
     });
   } catch (err) {
     next(err);
   }
 });
 
+/* Everything below acts on one case and needs that case's crew token,
+   sent as X-Crew-Token. A wrong token and a missing case look the same, so
+   probing sequential codes learns nothing. */
+function crewToken(req) { return req.get('X-Crew-Token') || (req.body && req.body.crew_token) || null; }
+async function loadForCrew(req, res) {
+  const record = await getStore().getBroadcast(req.params.code);
+  if (!record || !crewTokenValid(record, crewToken(req))) {
+    res.status(404).json({ success: false, reason: 'NOT_FOUND', message: 'No such case for this ambulance' });
+    return null;
+  }
+  return record;
+}
+
 router.get('/requests/:code', readLimiter, async (req, res, next) => {
   try {
-    const record = await getStore().getBroadcast(req.params.code);
-    if (!record) return res.status(404).json({ success: false, reason: 'NOT_FOUND', message: 'No such case' });
+    const record = await loadForCrew(req, res);
+    if (!record) return;
     res.json(toAmbulanceStatus(record));
   } catch (err) { next(err); }
 });
 
 router.post('/requests/:code/cancel', broadcastLimiter, async (req, res, next) => {
   try {
+    if (!(await loadForCrew(req, res))) return;
     const result = await cancelBroadcast(req.params.code, req.app.get('io'));
     if (!result.ok) return res.status(404).json({ success: false, reason: 'NOT_FOUND', message: 'No such case' });
     res.json(toAmbulanceStatus(result.record));
@@ -105,10 +126,12 @@ router.post('/requests/:code/cancel', broadcastLimiter, async (req, res, next) =
 /* The socket is the normal path for arrival, because the crew's phone is
    already holding one. This exists for the case that matters most: the socket
    dropped somewhere between acceptance and the hospital forecourt, and the
-   crew still has to be able to close the case. */
+   crew still has to be able to close the case. Arrival is always recorded at
+   the accepting hospital; the body cannot name another. */
 router.post('/requests/:code/arrived', broadcastLimiter, async (req, res, next) => {
   try {
-    const result = await markArrived(req.params.code, { hospital_id: (req.body || {}).hospital_id }, req.app.get('io'));
+    if (!(await loadForCrew(req, res))) return;
+    const result = await markArrived(req.params.code, { actor: 'crew' }, req.app.get('io'));
     if (!result.ok) {
       const status = result.reason === 'NOT_FOUND' ? 404 : 409;
       return res.status(status).json({ success: false, reason: result.reason, message: result.message });

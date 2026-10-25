@@ -6,6 +6,8 @@
 'use strict';
 process.env.PORT = process.env.TEST_PORT || '5099';
 process.env.DB_DRIVER = 'memory';
+process.env.DESK_AUTH = 'ip';          // LAN rehearsal identity; auth.test.js covers sign-in
+process.env.DEMO_SEED = 'false';
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const assert = require('assert');
@@ -73,6 +75,8 @@ async function main(){
     const a = await (await fetch(`${BASE}/api/v1/requests`, opts)).json();
     const b = await (await fetch(`${BASE}/api/v1/requests`, opts)).json();
     assert.strictEqual(a.id, b.id);
+    assert.strictEqual(b.idempotent_replay, true);
+    assert.ok(a.crew_token && a.crew_token === b.crew_token, 'a replay must hand back the same crew token');
   });
 
   /* broadcast and accept */
@@ -97,16 +101,21 @@ async function main(){
 
   /* tracking via socket */
   const sock = ioClient(BASE, { transports:['websocket'], forceNew:true });
-  await new Promise(r => sock.emit('case:follow', data.id, r));
+  const tok = data.crew_token;
+  const refused = await new Promise(r => sock.emit('case:follow', { case_code: data.id, crew_token: 'nope' }, r));
+  await check('case:follow without the right crew token is refused', () => assert.strictEqual(refused.success, false));
+  const spoofed = await new Promise(r => sock.emit('ambulance:position', { case_code:data.id, crew_token:'nope', lat:12.96, lng:77.59 }, r));
+  await check('a GPS fix without the crew token is refused', () => assert.strictEqual(spoofed.success, false));
+  await new Promise(r => sock.emit('case:follow', { case_code: data.id, crew_token: tok }, r));
   await sleep(50);
   const seen = [];
   sock.on('case:position', m => seen.push(m));
   await new Promise(res => setTimeout(res, 50));
-  sock.emit('ambulance:position', { case_code:data.id, lat:12.9650, lng:77.5940, accuracy_m:12, speed_kmh:30, source:'gps' });
+  sock.emit('ambulance:position', { case_code:data.id, crew_token:tok, lat:12.9650, lng:77.5940, accuracy_m:12, speed_kmh:30, source:'gps' });
   await sleep(200);
   /* second emit inside throttle window should be ignored */
-  sock.emit('ambulance:position', { case_code:data.id, lat:12.9655, lng:77.5940, speed_kmh:32 });
-  sock.emit('ambulance:position', { case_code:data.id, lat:12.9660, lng:77.5942, speed_kmh:34 });
+  sock.emit('ambulance:position', { case_code:data.id, crew_token:tok, lat:12.9655, lng:77.5940, speed_kmh:32 });
+  sock.emit('ambulance:position', { case_code:data.id, crew_token:tok, lat:12.9660, lng:77.5942, speed_kmh:34 });
   await sleep(200);
   await check('one case:position reached the desk', () => assert.ok(seen.length >= 1, 'got ' + seen.length));
   await check('live ETA is computed', () => {

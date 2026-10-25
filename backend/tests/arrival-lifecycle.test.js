@@ -17,6 +17,8 @@ const assert = require('assert');
 
 process.env.PORT = process.env.TEST_PORT_AL || '5103';
 process.env.DB_DRIVER = 'memory';
+process.env.DESK_AUTH = 'ip';          // LAN rehearsal identity; auth.test.js covers sign-in
+process.env.DEMO_SEED = 'false';
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const { io: ioClient } = require('socket.io-client');
@@ -62,6 +64,8 @@ async function main() {
   }).then(async r => ({ status: r.status, body: await r.json() }));
   check('broadcast returns 201', () => { assert.strictEqual(created.status, 201); });
   const code = created.body.id;
+  const tok = created.body.crew_token;
+  const withTok = { headers: { 'X-Crew-Token': tok } };
   await sleep(50);
 
   const accept = await fetch(`${BASE}/api/v1/desk/accept/${code}?hospital=1`, { method: 'POST' })
@@ -97,7 +101,7 @@ async function main() {
 
   /* The server stores status ACCEPTED with no arrived_at yet. */
   group('Persistence: arrived_at is NULL before the ambulance arrives');
-  const middleware = await fetch(`${BASE}/api/v1/requests/${code}`).then(r => r.json());
+  const middleware = await fetch(`${BASE}/api/v1/requests/${code}`, withTok).then(r => r.json());
   check('status reads ACCEPTED before arrival', () => {
     assert.strictEqual(middleware.status, 'ACCEPTED');
   });
@@ -109,11 +113,11 @@ async function main() {
   group('Phase 2 §27 arrival — move Active → Recently Handled');
   const socket = ioClient(BASE, { query: { role: 'ambulance' }, transports: ['websocket'], forceNew: true });
   await new Promise(resolve => socket.on('connect', resolve));
-  socket.emit('case:follow', code);
+  socket.emit('case:follow', { case_code: code, crew_token: tok });
   await sleep(50);
 
   const arrivedAck = await new Promise(resolve =>
-    socket.emit('ambulance:arrived', { case_code: code, hospital_id: 1 }, resolve)
+    socket.emit('ambulance:arrived', { case_code: code, crew_token: tok }, resolve)
   );
   check('ambulance:arrived ack is success', () => { assert.ok(arrivedAck && arrivedAck.success); });
   await sleep(80);
@@ -134,7 +138,7 @@ async function main() {
   check('refresh keeps the case out of active[]', () => {
     assert.strictEqual(q4.active.some(c => c.case_code === code), false);
   });
-  const postArrival = await fetch(`${BASE}/api/v1/requests/${code}`).then(r => r.json());
+  const postArrival = await fetch(`${BASE}/api/v1/requests/${code}`, withTok).then(r => r.json());
   check('status now reads ARRIVED', () => { assert.strictEqual(postArrival.status, 'ARRIVED'); });
   check('arrived_at is now set', () => {
     assert.ok(postArrival.arrived_at, 'arrived_at must be persisted by the server');
@@ -144,19 +148,21 @@ async function main() {
      must report success (already: true path is server-side). */
   group('Idempotency — a second ambulance:arrived is a no-op');
   const second = await new Promise(resolve =>
-    socket.emit('ambulance:arrived', { case_code: code, hospital_id: 1 }, resolve)
+    socket.emit('ambulance:arrived', { case_code: code, crew_token: tok }, resolve)
   );
   check('second ambulance:arrived reports success', () => { assert.ok(second && second.success); });
 
-  /* Wrong hospital reports arrival — must be refused. */
-  group('Wrong-hospital arrival — refuse');
+  /* Somebody holding only the (sequential) case code cannot close it. */
+  group('Arrival without the crew token — refuse');
   const wrong = await new Promise(resolve =>
-    socket.emit('ambulance:arrived', { case_code: code, hospital_id: 99 }, resolve)
+    socket.emit('ambulance:arrived', { case_code: code, crew_token: 'guessed', hospital_id: 99 }, resolve)
   );
-  check('arrival with wrong hospital_id is refused', () => {
+  check('arrival without the crew token is refused', () => {
     assert.ok(wrong && wrong.success === false);
-    assert.ok(['NOT_ACCEPTED', 'WRONG_HOSPITAL', 'NOT_FOUND'].includes(wrong.reason));
+    assert.strictEqual(wrong.reason, 'NOT_FOUND');
   });
+  const httpWrong = await fetch(`${BASE}/api/v1/requests/${code}/arrived`, { method: 'POST' });
+  check('the HTTP arrival fallback also needs the token', () => { assert.strictEqual(httpWrong.status, 404); });
 
   socket.close();
   server.close();

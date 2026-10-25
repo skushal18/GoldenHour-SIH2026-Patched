@@ -21,7 +21,7 @@ function createMemoryStore() {
       const out = [];
       for (const r of broadcasts.values()){
         const t = r.targets.find(x => x.hospital_id === id); if (!t) continue;
-        if (r.accepted_hospital_id && Number(r.accepted_hospital_id) !== id) continue;
+        if (!opts.offeredOnly && r.accepted_hospital_id && Number(r.accepted_hospital_id) !== id) continue;
         if (!opts.includeResolved && r.status === 'ARRIVED') continue;
         if (!opts.includeResolved && t.status === 'DECLINED') continue;
         out.push(r);

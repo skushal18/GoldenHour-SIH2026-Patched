@@ -1,15 +1,13 @@
 {
   "name": "goldenhour-backend",
-  "version": "5.1.0",
+  "version": "6.0.0",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js --memory",
     "demo": "node src/server.js --memory",
-    "build:desk": "vite build --config desk/vite.config.js",
-    "dev:desk": "vite --config desk/vite.config.js",
-    "pretest": "npm run build:desk",
-    "test": "node tests/security.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/desk-auth.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/tracking.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js && node tests/desk-arrival-tracking.test.js"
+    "test": "node tests/security.test.js && node tests/directory.test.js && node tests/auth.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/desk-arrival-tracking.test.js && node tests/tracking.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js",
+    "schema": "node -e \"process.stdout.write(require('./src/store/migrate').schemaSql())\""
   },
   "license": "MIT",
   "dependencies": {
@@ -21,9 +19,6 @@
     "mysql2": "^3.11.0",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.7.5"
-  },
-  "devDependencies": {
-    "vite": "^5.4.21"
   },
   "engines": {
     "node": ">=20 <23"

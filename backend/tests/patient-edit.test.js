@@ -14,6 +14,8 @@ const assert = require('assert');
 
 process.env.PORT = process.env.TEST_PORT_PE || '5101';
 process.env.DB_DRIVER = 'memory';
+process.env.DESK_AUTH = 'ip';          // LAN rehearsal identity; auth.test.js covers sign-in
+process.env.DEMO_SEED = 'false';
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const { io: ioClient } = require('socket.io-client');
@@ -88,6 +90,7 @@ async function main() {
   }).then(async r => ({ status: r.status, body: await r.json() }));
   check('broadcast returns 201', () => { assert.strictEqual(cast.status, 201); });
   const code = cast.body.id;
+  const tok = cast.body.crew_token;
   await sleep(120);
 
   const acceptResult = await a.accept(code);
@@ -107,7 +110,7 @@ async function main() {
     transports: ['websocket'], forceNew: true
   });
   await new Promise(resolve => ambulance.on('connect', resolve));
-  ambulance.emit('case:follow', code);
+  ambulance.emit('case:follow', { case_code: code, crew_token: tok });
   await sleep(80);
 
   const patch = {
@@ -115,8 +118,16 @@ async function main() {
     vitals: { systolic_bp: 92, diastolic_bp: 60, heart_rate: 118, resp_rate: 22, spo2: 91, glucose: 110 }
   };
 
+  const forged = await new Promise(resolve => {
+    ambulance.emit('patient:update', { case_code: code, crew_token: 'not-the-token', patient: { vitals: { spo2: 99 } } }, resolve);
+  });
+  check('an edit without the crew token is refused', () => {
+    assert.ok(forged && forged.success === false);
+    assert.strictEqual(forged.reason, 'NOT_FOUND');
+  });
+
   const editAck = await new Promise(resolve => {
-    ambulance.emit('patient:update', { case_code: code, patient: patch }, resolve);
+    ambulance.emit('patient:update', { case_code: code, crew_token: tok, patient: patch }, resolve);
   });
   check('server replies with success:true', () => { assert.ok(editAck && editAck.success); });
   await sleep(120);
@@ -134,7 +145,7 @@ async function main() {
   });
 
   /* ── Persistence — store still holds the updated values ───────────── */
-  const afterEdit = await fetch(`${BASE}/api/v1/requests/${code}`).then(r => r.json());
+  const afterEdit = await fetch(`${BASE}/api/v1/requests/${code}`, { headers: { 'X-Crew-Token': tok } }).then(r => r.json());
   check('GET /requests reflects edited patient block', () => {
     assert.strictEqual(afterEdit.patient.age, 60);
     assert.strictEqual(afterEdit.patient.vitals.spo2, 91);
@@ -149,7 +160,7 @@ async function main() {
   /* ── Refusal after arrival  ──────────────────────────────────────── */
   group('Phase 2 §26.3 — refuse post-arrival edits');
   const arrivedAck = await new Promise(resolve =>
-    ambulance.emit('ambulance:arrived', { case_code: code, hospital_id: 1 }, resolve)
+    ambulance.emit('ambulance:arrived', { case_code: code, crew_token: tok }, resolve)
   );
   check('ambulance:arrived ack is success', () => { assert.ok(arrivedAck && arrivedAck.success); });
   await sleep(120);
@@ -161,7 +172,7 @@ async function main() {
 
   const rejected = await new Promise(resolve => {
     ambulance.emit('patient:update', {
-      case_code: code, patient: { age: 65, vitals: { spo2: 92 } }
+      case_code: code, crew_token: tok, patient: { age: 65, vitals: { spo2: 92 } }
     }, resolve);
   });
   check('post-arrival patient:update is refused', () => {
@@ -173,7 +184,7 @@ async function main() {
   group('Phase 2 §26.2 — reject unknown case_code');
   const ghost = await new Promise(resolve => {
     ambulance.emit('patient:update', {
-      case_code: 'GH-1999-9999', patient: { age: 60 }
+      case_code: 'GH-1999-9999', crew_token: tok, patient: { age: 60 }
     }, resolve);
   });
   check('unknown case_code is NOT_FOUND', () => {
