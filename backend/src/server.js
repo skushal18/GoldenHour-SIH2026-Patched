@@ -56,7 +56,10 @@ const corsOptions = {
   origin: corsOrigin,
   credentials: false,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Request-Id', 'X-Hospital-Id'],
+  /* X-Crew-Token: the APK runs on https://localhost, so reading a case's
+     status with its crew token is a cross-origin request that the browser
+     preflights — without it here, every status poll from the APK fails. */
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Request-Id', 'X-Hospital-Id', 'X-Crew-Token'],
   maxAge: 600,
 };
 
