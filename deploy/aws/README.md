@@ -72,6 +72,7 @@ No secret value is in the code, git, the template, stack outputs, environment va
 - After **2 hours** with no real request (any API call or new realtime connection — `/health` does not count) the sleeper scales the Beanstalk instance to **0**, stops **RDS** and pauses the health probe.
 - While asleep the static pages still load; the API answers **504** within ~4 s. The ER desk, the admin console and the ambulance app then call **`/wake`** (at most once a minute) and show "GoldenHour is starting up…". The waker starts RDS and the instance; the app answers again after **~8–10 minutes** and the pages reconnect by themselves.
 - A case sent from the ambulance app while asleep waits in the app's outbox and is sent when the server is back.
+- The instance usually boots before the database; the app waits for it (`DB_WAIT_SECONDS=1800`, retrying every 10 s) instead of exiting. Measured on production from deep sleep, including a database that was still shutting down: about 9½ minutes.
 - An open ER desk polls every 10 s, so it keeps the stack awake — close desk screens you are not using.
 - RDS restarts itself after 7 days stopped; the sleeper stops it again within 15 minutes.
 - Change the idle time with the stack parameter `IdleStopMinutes`. Deploying while asleep fails — open `/wake` first and wait ~10 minutes.
