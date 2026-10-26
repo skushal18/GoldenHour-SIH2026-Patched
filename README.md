@@ -32,20 +32,23 @@ Logins in `backend/seed/accounts.json` (bcrypt hashes only; the passwords were g
 
 Set `DEMO_PASSWORD` to fix the demo passwords for a rehearsed demo.
 
-## Deploy (Railway)
+## Deploy (AWS)
 
-The repository root deploys as one service (`railway.toml`). Add Railway's MySQL plugin and reference its `MYSQL_URL` — the server creates its tables on first start. Set:
+Live: **https://d31kwkffv9iv72.cloudfront.net** — `/hospital` (ER desk), `/admin`, `/ambulance`, `/health`.
 
-| Variable | Value |
+| Piece | What |
 |---|---|
-| `NODE_ENV` | `production` |
-| `DB_DRIVER` | `mysql` |
-| `JWT_SECRET` | 48 random bytes, base64url |
-| `CORS_ORIGIN` | `https://localhost` (the Android APK) plus any other browser origin |
-| `HACKATHON_MODE` | `false` (or leave unset in a non-production demo) |
-| `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_PASSWORD` | the first administrator; change the password at first sign-in, then remove these |
+| Server | EC2 `t4g.small` (Amazon Linux 2023, arm64) in ap-southeast-2, instance `i-04a337bf8a7adf656`, Elastic IP `52.64.219.180` |
+| App | Node 22, systemd service `goldenhour`, port 8080, code in `/opt/goldenhour` |
+| Database | MariaDB on the same server (database `goldenhour`); tables are created by the app |
+| HTTPS | CloudFront distribution `EXTEH411I2R7O` (caching off, WebSockets through) — the only thing allowed to reach port 8080 |
+| Config | `/etc/goldenhour.env` on the server; the JWT secret and DB password were generated there |
+| Deploys | Automatic: every 3 minutes the server pulls `Patch-2` from GitHub and restarts if it changed (`/var/log/goldenhour-deploys.log`) |
+| Access | No SSH; use Systems Manager → Session Manager in the AWS console |
 
-Production refuses to start on an unsafe configuration and says what to fix. All variables: [`backend/.env.example`](backend/.env.example).
+So: **push to `Patch-2` → live within ~3 minutes.** The APK reads `app/www/config.js`, which points at the CloudFront address; rebuild it after that changes.
+
+The server runs with `HACKATHON_MODE=true` (every hospital with a login gets every case, wherever the ambulance is), which production mode refuses — so it runs with `NODE_ENV=development` and every other production setting (signed-in desks, strong secret, MySQL, CORS limited to the APK).
 
 ## How it fits together
 
