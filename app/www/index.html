@@ -10,26 +10,64 @@
 <meta name="description" content="GoldenHour — pre-arrival emergency coordination between ambulance crews and hospital emergency departments.">
 <title>GoldenHour</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2322C6DE'/%3E%3Cpath d='M22 50h13l7-14 11 24 7-10h18' fill='none' stroke='%2307343D' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<!-- Inter ships inside the APK (48 KB, Latin, variable weight). Preloaded so
+     the first paint already uses it; the system font stands in until then. -->
+<link rel="preload" href="fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<!-- Pick the visual tier before first paint, so a low-end phone never has to
+     paint the heavy version first. ui.js owns the rest of this. -->
+<script src="theme-boot.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- The ambient wash the acrylic surfaces float over. Two very soft radial
-     tints, no animation: it gives the glass something to refract without
-     costing a repaint. -->
+<!-- Icons: a hand-picked subset of Lucide (ISC licence, lucide.dev), inlined
+     as one sprite so they cost no requests and no runtime library. -->
+<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+  <symbol id="i-ambulance" viewBox="0 0 24 24"><path d="M10 10H6"/><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.28a1 1 0 0 0-.684-.948l-1.923-.641a1 1 0 0 1-.578-.502l-1.539-3.076A1 1 0 0 0 16.382 8H14"/><path d="M8 8v4"/><path d="M9 18h6"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-clipboard-list" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-heart-pulse" viewBox="0 0 24 24"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/><path d="M3.22 13H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="i-hospital" viewBox="0 0 24 24"><path d="M12 7v4"/><path d="M14 21v-3a2 2 0 0 0-4 0v3"/><path d="M14 9h-4"/><path d="M18 11h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h2"/><path d="M18 21V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-locate-fixed" viewBox="0 0 24 24"><line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></symbol>
+  <symbol id="i-navigation" viewBox="0 0 24 24"><polygon points="3 11 22 2 13 21 11 13 3 11"/></symbol>
+  <symbol id="i-pencil-line" viewBox="0 0 24 24"><path d="M13 21h8"/><path d="m15 5 4 4"/><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-radio-tower" viewBox="0 0 24 24"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9"/><path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47"/><path d="M19.1 1.9a9.96 9.96 0 0 1 0 14.1"/><path d="M9.5 18h5"/><path d="m8 22 4-11 4 11"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-siren" viewBox="0 0 24 24"><path d="M7 18v-6a5 5 0 1 1 10 0v6"/><path d="M5 21a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2z"/><path d="M21 12h1"/><path d="M18.5 4.5 18 5"/><path d="M2 12h1"/><path d="M12 2v1"/><path d="m4.929 4.929.707.707"/><path d="M12 12v6"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+  <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+</svg>
+
+<!-- The ambient wash the glass floats over. Static gradients, painted once:
+     translucent surfaces moving over it read as glass without paying for a
+     live blur behind every card. -->
 <div class="ambient" aria-hidden="true"></div>
 
 <div class="app" id="app">
 
   <!-- ═══ Top bar ═══════════════════════════════════════════════════════ -->
-  <header class="topbar acrylic">
+  <header class="topbar glass" id="topbar">
     <div class="brand">
-      <span class="mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 21s-7.5-4.7-7.5-10A4.5 4.5 0 0 1 12 8.4a4.5 4.5 0 0 1 7.5 2.6c0 5.3-7.5 10-7.5 10Z"/>
-          <path d="M9 12h1.6l1-2 1.6 3.4 1-1.4H16"/>
-        </svg>
-      </span>
+      <span class="mark" aria-hidden="true"><svg class="i"><use href="#i-heart-pulse"/></svg></span>
       <span class="brand-text">
         <span class="brand-name">Golden<em>Hour</em></span>
         <span class="brand-sub">Pre-arrival emergency coordination</span>
@@ -39,67 +77,79 @@
   </header>
 
   <button type="button" class="banner banner-caution" id="outboxPill" hidden>
-    <span id="outboxText">0 cases queued</span>
+    <svg class="i banner-icon" aria-hidden="true"><use href="#i-wifi-off"/></svg>
+    <span class="banner-text" id="outboxText">0 cases queued</span>
     <span class="banner-cta">View</span>
   </button>
 
   <div class="banner banner-caution" id="demoBanner" hidden role="status">
-    <span>Demo mode — nothing is sent to a hospital. No backend is configured for this build.</span>
+    <svg class="i banner-icon" aria-hidden="true"><use href="#i-info"/></svg>
+    <span class="banner-text">Demo mode — nothing is sent to a hospital. No backend is configured for this build.</span>
     <button type="button" class="banner-cta" id="retryConnBtn">Retry</button>
   </div>
 
   <div class="banner banner-critical" id="loadError" hidden role="alert">
-    <span id="loadErrorText">The case list could not be loaded.</span>
+    <svg class="i banner-icon" aria-hidden="true"><use href="#i-triangle-alert"/></svg>
+    <span class="banner-text" id="loadErrorText">The case list could not be loaded.</span>
     <button type="button" class="banner-cta" id="retryListsBtn">Retry</button>
   </div>
 
   <!-- ═══ HOME ═════════════════════════════════════════════════════════ -->
   <main class="scroll view" id="homeView">
 
-    <section class="hero acrylic">
-      <p class="hero-eyebrow">Ready when you are</p>
+    <section class="hero">
+      <div class="hero-top">
+        <p class="hero-eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>Ready when you are</p>
+        <span class="hero-badge" aria-hidden="true"><svg class="i"><use href="#i-siren"/></svg></span>
+      </div>
       <h1 class="hero-title">Alert every hospital at once</h1>
       <p class="hero-sub">The first emergency department to accept takes the case. You never pick one.</p>
-      <button type="button" class="btn-primary btn-hero" id="startAlertBtn">Start new alert</button>
+      <button type="button" class="btn-primary btn-hero" id="startAlertBtn">
+        <svg class="i" aria-hidden="true"><use href="#i-siren"/></svg>
+        <span>Start new alert</span>
+      </button>
     </section>
 
-    <section class="card" id="activeCaseBox" hidden>
+    <section class="card active-card" id="activeCaseBox" hidden>
       <div class="card-head">
-        <h2>Active case</h2>
-        <span class="tag tag-brand" id="activeCaseCode">—</span>
-      </div>
-      <div class="active-grid">
-        <div class="active-fact"><span>Case</span><b id="activePatientName">—</b></div>
-        <div class="active-fact"><span>Patient</span><b id="activeAgeBand">—</b></div>
-        <div class="active-fact"><span>Sex</span><b id="activeGenderLabel">—</b></div>
-        <div class="active-fact"><span>Blood</span><b id="activeBlood">—</b></div>
-        <div class="active-fact"><span>Consciousness</span><b id="activeCondition">—</b></div>
-        <div class="active-fact"><span>Heart rate</span><b id="activeHr">—</b></div>
-        <div class="active-fact"><span>Blood pressure</span><b id="activeBp">—</b></div>
-        <div class="active-fact"><span>SpO<sub>2</sub></span><b id="activeSpo2">—</b></div>
+        <h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-ambulance"/></svg></span>Active case</h2>
+        <span class="tag tag-brand tag-mono" id="activeCaseCode">—</span>
       </div>
       <div class="active-status">
         <div class="active-status-main">
           <span class="active-status-label">Status</span>
           <b id="activeStatusText">Waiting for a hospital</b>
         </div>
-        <div class="active-status-main">
+        <div class="active-status-main active-eta">
           <span class="active-status-label">ETA</span>
           <b id="activeEta">— min</b>
         </div>
       </div>
-      <p class="active-facility">Hospital: <b id="activeFacility">—</b></p>
+      <p class="active-facility"><svg class="i" aria-hidden="true"><use href="#i-hospital"/></svg><span>Hospital: <b id="activeFacility">—</b></span></p>
+      <div class="active-grid">
+        <div class="active-fact"><span>Case</span><b id="activePatientName">—</b></div>
+        <div class="active-fact"><span>Patient</span><b id="activeAgeBand">—</b></div>
+        <div class="active-fact"><span>Sex</span><b id="activeGenderLabel">—</b></div>
+        <div class="active-fact"><span>Blood</span><b id="activeBlood">—</b></div>
+        <div class="active-fact"><span>Consciousness</span><b id="activeCondition">—</b></div>
+        <div class="active-fact fact-vital"><span>Heart rate</span><b id="activeHr">—</b></div>
+        <div class="active-fact fact-vital"><span>BP</span><b id="activeBp">—</b></div>
+        <div class="active-fact fact-vital"><span>SpO<sub>2</sub></span><b id="activeSpo2">—</b></div>
+      </div>
       <p class="active-case-notes" id="activeNotes">No additional notes</p>
       <p class="tracking-line" id="activeTracking" hidden><span class="live-dot" aria-hidden="true"></span><span id="trackingText">Waiting for GPS and server confirmation…</span><button type="button" class="btn-ghost btn-sm" id="retryTrackingBtn">Retry GPS</button></p>
       <p class="ticker" id="updateTicker" role="status"></p>
-      <div class="banner banner-good" id="arrivedBanner" hidden role="status">Arrival recorded. This case is closed.</div>
+      <div class="banner banner-good" id="arrivedBanner" hidden role="status">
+        <svg class="i banner-icon" aria-hidden="true"><use href="#i-circle-check"/></svg>
+        <span class="banner-text">Arrival recorded. This case is closed.</span>
+      </div>
       <div class="active-actions">
-        <button type="button" class="btn-secondary" id="continueCaseBtn">Continue case</button>
-        <button type="button" class="btn-secondary" id="editPatientBtn">Edit patient</button>
-        <a class="btn-secondary" id="navBtn" hidden href="#" rel="noopener">Navigate</a>
-        <a class="btn-secondary" id="callBtn" hidden href="#">Call</a>
-        <button type="button" class="btn-ghost" id="delayedBtn">Report delay</button>
-        <button type="button" class="btn-primary" id="arrivedBtn">Reached hospital</button>
+        <button type="button" class="btn-secondary" id="continueCaseBtn"><svg class="i" aria-hidden="true"><use href="#i-radio-tower"/></svg><span>Continue case</span></button>
+        <button type="button" class="btn-secondary" id="editPatientBtn"><svg class="i" aria-hidden="true"><use href="#i-pencil-line"/></svg><span>Edit patient</span></button>
+        <a class="btn-secondary" id="navBtn" hidden href="#" rel="noopener"><svg class="i" aria-hidden="true"><use href="#i-navigation"/></svg><span>Navigate</span></a>
+        <a class="btn-secondary" id="callBtn" hidden href="#"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg><span>Call</span></a>
+        <button type="button" class="btn-ghost" id="delayedBtn"><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg><span>Report delay</span></button>
+        <button type="button" class="btn-primary" id="arrivedBtn"><svg class="i" aria-hidden="true"><use href="#i-hospital"/></svg><span>Reached hospital</span></button>
       </div>
     </section>
 
@@ -107,16 +157,28 @@
       <div class="card-head"><h2>Quick access</h2></div>
       <div class="quick-list">
         <button type="button" class="quick-row" data-go="new">
-          <span class="quick-title">New alert</span>
-          <span class="quick-sub">Start a new hospital pre-arrival alert.</span>
+          <span class="row-icon tint-accent" aria-hidden="true"><svg class="i"><use href="#i-siren"/></svg></span>
+          <span class="row-text">
+            <span class="quick-title">New alert</span>
+            <span class="quick-sub">Start a new hospital pre-arrival alert.</span>
+          </span>
+          <svg class="i row-chev" aria-hidden="true"><use href="#i-chevron-right"/></svg>
         </button>
         <button type="button" class="quick-row" data-go="active">
-          <span class="quick-title">Active case</span>
-          <span class="quick-sub" id="quickActiveSub">No case is running.</span>
+          <span class="row-icon tint-brand" aria-hidden="true"><svg class="i"><use href="#i-ambulance"/></svg></span>
+          <span class="row-text">
+            <span class="quick-title">Active case</span>
+            <span class="quick-sub" id="quickActiveSub">No case is running.</span>
+          </span>
+          <svg class="i row-chev" aria-hidden="true"><use href="#i-chevron-right"/></svg>
         </button>
         <button type="button" class="quick-row" data-go="cases">
-          <span class="quick-title">Recent cases</span>
-          <span class="quick-sub" id="quickRecentSub">Nothing yet this shift.</span>
+          <span class="row-icon tint-neutral" aria-hidden="true"><svg class="i"><use href="#i-history"/></svg></span>
+          <span class="row-text">
+            <span class="quick-title">Recent cases</span>
+            <span class="quick-sub" id="quickRecentSub">Nothing yet this shift.</span>
+          </span>
+          <svg class="i row-chev" aria-hidden="true"><use href="#i-chevron-right"/></svg>
         </button>
       </div>
     </section>
@@ -129,8 +191,10 @@
     </section>
   </main>
 
-  <!-- ═══ NEW ALERT (the emergency form) ═══════════════════════════════ -->
-  <main class="scroll view" id="formScroll" hidden>
+  <!-- ═══ NEW ALERT (the emergency form) ═══════════════════════════════
+       Each section card is numbered by a CSS counter, so the hidden stroke
+       section never leaves a gap in the sequence. -->
+  <main class="scroll view form-view" id="formScroll" hidden>
 
     <section class="card" id="caseCard">
       <div class="card-head">
@@ -140,9 +204,12 @@
       <p class="card-sub">Tap the closest match. You can refine it from the full list below.</p>
       <div class="chip-row chip-scroll" id="quickCase"></div>
       <label class="field-label" for="caseType">All case types</label>
-      <select id="caseType" class="select">
-        <option value="">Choose the emergency…</option>
-      </select>
+      <span class="select-wrap">
+        <select id="caseType" class="select">
+          <option value="">Choose the emergency…</option>
+        </select>
+        <svg class="i select-chev" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+      </span>
       <p class="hint" id="caseTypeHint">Priority is worked out by the system from the vitals — you never grade the patient.</p>
     </section>
 
@@ -150,7 +217,7 @@
       <div class="card-head"><h2>Patient</h2></div>
 
       <!-- The value the rest of the application reads. Set by the band chips
-           below; never typed. See AGE_BANDS in modules/logic.js. -->
+           below; never typed. See AGE_BANDS in app.js. -->
       <input type="hidden" id="age">
 
       <span class="field-label" id="ageLabel">Age group <span class="req-mark" aria-hidden="true">Required</span></span>
@@ -165,7 +232,7 @@
       </div>
 
       <span class="field-label">Blood group <span class="opt-mark">If known</span></span>
-      <div class="chip-row" id="bloodChips">
+      <div class="chip-row chip-grid" id="bloodChips">
         <button type="button" class="chip chip-xs" data-blood="O+">O+</button>
         <button type="button" class="chip chip-xs" data-blood="O-">O−</button>
         <button type="button" class="chip chip-xs" data-blood="A+">A+</button>
@@ -224,25 +291,27 @@
         </div>
       </div>
 
-      <div class="vital">
-        <label class="field-label" for="heartRate">Heart rate <span class="unit">bpm</span></label>
-        <span class="chip-state" id="hrChip" hidden></span>
-        <input type="number" id="heartRate" class="input" inputmode="numeric" placeholder="—">
-      </div>
-      <div class="vital">
-        <label class="field-label" for="respRate">Respiratory rate <span class="unit">per min</span></label>
-        <span class="chip-state" id="rrChip" hidden></span>
-        <input type="number" id="respRate" class="input" inputmode="numeric" placeholder="—">
-      </div>
-      <div class="vital">
-        <label class="field-label" for="spo2">SpO<sub>2</sub> <span class="unit">%</span></label>
-        <span class="chip-state" id="spo2Chip" hidden></span>
-        <input type="number" id="spo2" class="input" inputmode="numeric" placeholder="—">
-      </div>
-      <div class="vital">
-        <label class="field-label" for="glucose">Glucose <span class="unit">mg/dL</span></label>
-        <span class="chip-state" id="glcChip" hidden></span>
-        <input type="number" id="glucose" class="input" inputmode="numeric" placeholder="—">
+      <div class="vital-grid">
+        <div class="vital">
+          <label class="field-label" for="heartRate">Heart rate <span class="unit">bpm</span></label>
+          <span class="chip-state" id="hrChip" hidden></span>
+          <input type="number" id="heartRate" class="input" inputmode="numeric" placeholder="—">
+        </div>
+        <div class="vital">
+          <label class="field-label" for="respRate">Resp. rate <span class="unit">/min</span></label>
+          <span class="chip-state" id="rrChip" hidden></span>
+          <input type="number" id="respRate" class="input" inputmode="numeric" placeholder="—">
+        </div>
+        <div class="vital">
+          <label class="field-label" for="spo2"><span>SpO<sub>2</sub></span> <span class="unit">%</span></label>
+          <span class="chip-state" id="spo2Chip" hidden></span>
+          <input type="number" id="spo2" class="input" inputmode="numeric" placeholder="—">
+        </div>
+        <div class="vital">
+          <label class="field-label" for="glucose">Glucose <span class="unit">mg/dL</span></label>
+          <span class="chip-state" id="glcChip" hidden></span>
+          <input type="number" id="glucose" class="input" inputmode="numeric" placeholder="—">
+        </div>
       </div>
     </section>
 
@@ -250,22 +319,28 @@
       <div class="card-head"><h2>FAST stroke check</h2><span class="tag tag-brand">Stroke case</span></div>
       <p class="card-sub">Onset time decides whether thrombolysis is still possible. It is the single most useful thing the ER can know before arrival.</p>
 
-      <span class="field-label" id="fastFaceLabel">Facial droop</span>
-      <div class="seg seg-yn" id="fastFace" role="radiogroup" aria-labelledby="fastFaceLabel">
-        <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
-        <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+      <div class="yn-row">
+        <span class="field-label" id="fastFaceLabel">Facial droop</span>
+        <div class="seg seg-yn" id="fastFace" role="radiogroup" aria-labelledby="fastFaceLabel">
+          <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
+          <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+        </div>
       </div>
 
-      <span class="field-label" id="fastArmLabel">Arm weakness</span>
-      <div class="seg seg-yn" id="fastArm" role="radiogroup" aria-labelledby="fastArmLabel">
-        <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
-        <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+      <div class="yn-row">
+        <span class="field-label" id="fastArmLabel">Arm weakness</span>
+        <div class="seg seg-yn" id="fastArm" role="radiogroup" aria-labelledby="fastArmLabel">
+          <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
+          <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+        </div>
       </div>
 
-      <span class="field-label" id="fastSpeechLabel">Speech difficulty</span>
-      <div class="seg seg-yn" id="fastSpeech" role="radiogroup" aria-labelledby="fastSpeechLabel">
-        <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
-        <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+      <div class="yn-row">
+        <span class="field-label" id="fastSpeechLabel">Speech difficulty</span>
+        <div class="seg seg-yn" id="fastSpeech" role="radiogroup" aria-labelledby="fastSpeechLabel">
+          <button type="button" class="seg-btn is-on" data-yn="no" role="radio" aria-checked="true">No</button>
+          <button type="button" class="seg-btn" data-yn="yes" role="radio" aria-checked="false">Yes</button>
+        </div>
       </div>
 
       <label class="field-label" for="onsetHours">Hours since symptoms began</label>
@@ -296,12 +371,7 @@
       <p class="card-sub">Injury, scene, ECG strip or medicine box. Compressed on the device before sending.</p>
       <div class="photo-grid" id="photoGrid">
         <button type="button" class="photo-add" id="addPhotoBtn">
-          <span class="photo-add-glyph" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1.1-1.8A1 1 0 0 1 9.2 3.7h5.6a1 1 0 0 1 .9.5L16.8 6h1.7A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5Z"/>
-              <circle cx="12" cy="12.5" r="3.4"/>
-            </svg>
-          </span>
+          <span class="photo-add-glyph" aria-hidden="true"><svg class="i"><use href="#i-camera"/></svg></span>
           <span class="photo-add-label">Add photo</span>
         </button>
       </div>
@@ -314,7 +384,7 @@
     <section class="card">
       <div class="card-head"><h2>Where you are</h2></div>
       <div class="locbox" id="locBox">
-        <span class="loc-icon" id="locIcon" aria-hidden="true">◎</span>
+        <span class="loc-icon" id="locIcon" aria-hidden="true"><svg class="i"><use href="#i-map-pin"/></svg></span>
         <span class="loc-text">
           <b id="locationStatus">Locating device…</b>
           <small id="locationMeta">—</small>
@@ -322,7 +392,7 @@
         <button type="button" class="btn-ghost btn-inline" id="locRetryBtn" hidden>Retry</button>
       </div>
 
-      <div id="locFallback" hidden>
+      <div class="loc-fallback" id="locFallback" hidden>
         <p class="hint">Pick a starting point, or type the coordinates. Whatever you choose is labelled for the ER as set by hand, never shown as a GPS fix.</p>
         <div class="chip-row" id="locFallbackChips"></div>
         <div class="coord-row">
@@ -335,7 +405,7 @@
             <input type="text" id="manualLng" class="input" inputmode="decimal" placeholder="77.5946">
           </span>
         </div>
-        <button type="button" class="btn-secondary" id="useManualBtn">Use these coordinates</button>
+        <button type="button" class="btn-secondary" id="useManualBtn"><svg class="i" aria-hidden="true"><use href="#i-locate-fixed"/></svg><span>Use these coordinates</span></button>
       </div>
     </section>
 
@@ -343,9 +413,9 @@
       <div class="card-head"><h2>Broadcast</h2></div>
       <p class="card-sub">Every registered emergency department within the radius is alerted at once. The first to accept takes the case.</p>
 
-      <label class="field-label" for="radiusKm">Radius <span class="unit" id="radiusOut">15 km</span></label>
+      <label class="field-label" for="radiusKm">Radius <span class="unit unit-value" id="radiusOut">15 km</span></label>
       <input type="range" id="radiusKm" class="slider" min="5" max="50" step="5" value="15">
-      <div class="chip-row" id="radiusChips">
+      <div class="chip-row chip-even" id="radiusChips">
         <button type="button" class="chip chip-xs" data-radius="5">5</button>
         <button type="button" class="chip chip-xs" data-radius="10">10</button>
         <button type="button" class="chip chip-xs is-on" data-radius="15">15</button>
@@ -355,7 +425,7 @@
 
       <label class="field-label" for="eta">Your ETA <span class="unit">minutes</span></label>
       <input type="number" id="eta" class="input" inputmode="numeric" min="1" max="180" placeholder="Minutes">
-      <div class="chip-row" id="etaChips">
+      <div class="chip-row chip-even" id="etaChips">
         <button type="button" class="chip chip-xs" data-eta="5">5</button>
         <button type="button" class="chip chip-xs" data-eta="10">10</button>
         <button type="button" class="chip chip-xs" data-eta="15">15</button>
@@ -367,8 +437,14 @@
       <textarea id="notes" class="input textarea" maxlength="160" rows="2" placeholder="Anything the ER should know before you arrive"></textarea>
     </section>
 
+    <!-- Docked above the tab bar while the form scrolls, so the one action
+         that matters is never more than a thumb away. -->
     <div class="submit-bar">
-      <button type="button" class="btn-primary" id="submitBtn">Broadcast request</button>
+      <button type="button" class="btn-primary btn-submit" id="submitBtn">
+        <span class="spinner" aria-hidden="true"></span>
+        <svg class="i submit-icon" aria-hidden="true"><use href="#i-send"/></svg>
+        <span>Broadcast request</span>
+      </button>
       <p class="submit-hint" id="submitHint">Checking readiness…</p>
     </div>
   </main>
@@ -376,7 +452,7 @@
   <!-- ═══ CASES ════════════════════════════════════════════════════════ -->
   <main class="scroll view" id="casesView" hidden>
     <section class="card">
-      <div class="card-head"><h2>Recent cases</h2></div>
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-history"/></svg></span>Recent cases</h2></div>
       <p class="card-sub">Kept on this device only. No patient names are stored.</p>
       <div class="recent-list" id="caseList">
         <p class="empty-note">Nothing yet this shift.</p>
@@ -387,68 +463,84 @@
   <!-- ═══ SETTINGS ═════════════════════════════════════════════════════ -->
   <main class="scroll view" id="settingsView" hidden>
     <section class="card">
-      <div class="card-head"><h2>This vehicle</h2></div>
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-ambulance"/></svg></span>This vehicle</h2></div>
       <label class="field-label" for="ambulanceId">Ambulance unit ID</label>
-      <input type="text" id="ambulanceId" class="input" placeholder="KA01AB1234" autocomplete="off" spellcheck="false">
+      <input type="text" id="ambulanceId" class="input input-mono" placeholder="KA01AB1234" autocomplete="off" spellcheck="false">
       <p class="hint">Stored on this device and sent with every case, so the ER knows which unit is arriving.</p>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Connection</h2></div>
-      <div class="setting-row">
-        <span class="setting-label">Mode</span>
-        <b class="setting-value" id="setMode">—</b>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">Backend</span>
-        <b class="setting-value setting-mono" id="setBackend">—</b>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">Realtime</span>
-        <b class="setting-value" id="setRealtime">—</b>
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-radio-tower"/></svg></span>Connection</h2></div>
+      <div class="setting-list">
+        <div class="setting-row">
+          <span class="setting-label">Mode</span>
+          <b class="setting-value" id="setMode">—</b>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Backend</span>
+          <b class="setting-value setting-mono" id="setBackend">—</b>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Realtime</span>
+          <b class="setting-value" id="setRealtime">—</b>
+        </div>
       </div>
       <p class="hint" id="setModeWhy">—</p>
       <button type="button" class="btn-secondary" id="setRecheckBtn">Re-check the connection</button>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Queued cases</h2></div>
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-inbox"/></svg></span>Queued cases</h2></div>
       <p class="card-sub" id="setOutboxSummary">Nothing is waiting to send.</p>
       <button type="button" class="btn-secondary" id="setOutboxBtn">Open the queue</button>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>On this device</h2></div>
-      <div class="setting-row">
-        <span class="setting-label">Cases kept locally</span>
-        <b class="setting-value" id="setCaseCount">0</b>
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-shield-check"/></svg></span>On this device</h2></div>
+      <div class="setting-list">
+        <div class="setting-row">
+          <span class="setting-label">Cases kept locally</span>
+          <b class="setting-value" id="setCaseCount">0</b>
+        </div>
       </div>
       <p class="hint">Case history is stored on this phone only — case code, type, age group, sex and status. No names, no addresses, no notes.</p>
       <button type="button" class="btn-ghost" id="setClearCasesBtn">Clear local case history</button>
     </section>
+
+    <!-- Display preferences. Handled entirely by ui.js; nothing here reaches
+         the case logic or the server. -->
+    <section class="card" id="appearanceCard">
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-sparkles"/></svg></span>Appearance</h2></div>
+      <span class="field-label" id="themeLabel">Theme</span>
+      <div class="seg seg-icons" id="themeSeg" role="radiogroup" aria-labelledby="themeLabel">
+        <button type="button" class="seg-btn" data-theme-choice="system" role="radio" aria-checked="true"><svg class="i" aria-hidden="true"><use href="#i-monitor"/></svg>System</button>
+        <button type="button" class="seg-btn" data-theme-choice="light" role="radio" aria-checked="false"><svg class="i" aria-hidden="true"><use href="#i-sun"/></svg>Light</button>
+        <button type="button" class="seg-btn" data-theme-choice="dark" role="radio" aria-checked="false"><svg class="i" aria-hidden="true"><use href="#i-moon"/></svg>Dark</button>
+      </div>
+      <button type="button" class="switch-row" id="fxSwitch" role="switch" aria-checked="false">
+        <span class="switch-text">
+          <b>Lighter visuals</b>
+          <small id="fxHint">Turns off glass blur for older or slower phones.</small>
+        </span>
+        <span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+      </button>
+    </section>
   </main>
 
   <!-- ═══ Bottom navigation ════════════════════════════════════════════ -->
-  <nav class="tabbar acrylic" id="tabbar" aria-label="Main">
+  <nav class="tabbar glass" id="tabbar" aria-label="Main">
+    <span class="tab-ink" aria-hidden="true"></span>
     <button type="button" class="tab is-on" data-view="home" aria-current="page">
-      <span class="tab-glyph" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1Z"/></svg>
-      </span><span>Home</span>
+      <span class="tab-glyph" aria-hidden="true"><svg class="i"><use href="#i-house"/></svg></span><span class="tab-label">Home</span>
     </button>
     <button type="button" class="tab" data-view="new">
-      <span class="tab-glyph" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-      </span><span>New alert</span>
+      <span class="tab-glyph" aria-hidden="true"><svg class="i"><use href="#i-plus"/></svg></span><span class="tab-label">New alert</span>
     </button>
     <button type="button" class="tab" data-view="cases">
-      <span class="tab-glyph" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-      </span><span>Cases</span>
+      <span class="tab-glyph" aria-hidden="true"><svg class="i"><use href="#i-clipboard-list"/></svg></span><span class="tab-label">Cases</span>
     </button>
     <button type="button" class="tab" data-view="settings">
-      <span class="tab-glyph" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.2M12 18.8V21M4.6 7.5l1.9 1.1M17.5 15.4l1.9 1.1M4.6 16.5l1.9-1.1M17.5 8.6l1.9-1.1"/></svg>
-      </span><span>Settings</span>
+      <span class="tab-glyph" aria-hidden="true"><svg class="i"><use href="#i-settings"/></svg></span><span class="tab-label">Settings</span>
     </button>
   </nav>
 </div>
@@ -460,82 +552,106 @@
 
 <div class="overlay" id="successOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="successTitle">
   <div class="sheet">
-    <button type="button" class="sheet-x" data-close="successOverlay" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
+    <span class="sheet-grab" aria-hidden="true"></span>
+    <button type="button" class="sheet-x" data-close="successOverlay" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    <span class="sheet-badge badge-brand" aria-hidden="true"><svg class="i"><use href="#i-radio-tower"/></svg></span>
     <h2 id="successTitle">Request broadcast</h2>
     <p class="sheet-sub" id="broadcastInfo">Sent.</p>
 
     <div class="status-chip status-pending" id="statusChip">
+      <span class="status-glyph" aria-hidden="true"></span>
       <span id="statusChipText">Waiting for a hospital to accept…</span>
     </div>
 
     <div class="accepted-box" id="acceptedBox" hidden>
-      <b class="accepted-name" id="acceptedName">—</b>
-      <span class="accepted-meta" id="acceptedMeta">—</span>
+      <span class="accepted-icon" aria-hidden="true"><svg class="i"><use href="#i-hospital"/></svg></span>
+      <span class="accepted-text">
+        <b class="accepted-name" id="acceptedName">—</b>
+        <span class="accepted-meta" id="acceptedMeta">—</span>
+      </span>
     </div>
 
     <div class="call-ahead" id="callAheadBox" hidden>
-      <b class="call-ahead-title" id="callAheadTitle">Hospitals nearby to call</b>
+      <span class="call-ahead-head">
+        <span class="call-ahead-icon" aria-hidden="true"><svg class="i"><use href="#i-phone"/></svg></span>
+        <b class="call-ahead-title" id="callAheadTitle">Hospitals nearby to call</b>
+      </span>
       <span class="call-ahead-note">Not on GoldenHour, so they did not get this case. Phone ahead before you go.</span>
       <div id="callAheadList"></div>
     </div>
 
     <p class="sheet-note" id="sheetNote">You can close this and keep working. The case stays on the Home screen.</p>
-    <button type="button" class="btn-primary" id="newRequestBtn">Start new request</button>
+    <button type="button" class="btn-primary" id="newRequestBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg><span>Start new request</span></button>
+  </div>
+</div>
+
+<div class="overlay" id="delayOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="delayTitle">
+  <div class="sheet">
+    <span class="sheet-grab" aria-hidden="true"></span>
+    <button type="button" class="sheet-x" data-close="delayOverlay" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    <span class="sheet-badge badge-caution" aria-hidden="true"><svg class="i"><use href="#i-clock"/></svg></span>
+    <h2 id="delayTitle">Report a delay</h2>
+    <p class="sheet-sub">The receiving hospital sees this on its board straight away.</p>
+    <span class="field-label">Reason</span>
+    <div class="delay-reasons" id="delayReasons" role="radiogroup" aria-label="Reason">
+      <button type="button" class="chip" role="radio" aria-checked="true" data-reason="traffic">Traffic</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="road_blocked">Road blocked</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="vehicle_issue">Vehicle problem</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="patient_deteriorating">Patient deteriorating</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="other">Other</button>
+    </div>
+    <span class="field-label">Extra time</span>
+    <div class="delay-reasons" id="delayMinutes" role="radiogroup" aria-label="Extra time">
+      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="5">+5 min</button>
+      <button type="button" class="chip" role="radio" aria-checked="true" data-minutes="10">+10 min</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="20">+20 min</button>
+      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="">Not sure</button>
+    </div>
+    <p class="sheet-note" id="delayStatus" role="status"></p>
+    <button type="button" class="btn-primary" id="delaySendBtn"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg><span>Tell the hospital</span></button>
   </div>
 </div>
 
 <div class="overlay" id="errorOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="errorTitle">
   <div class="sheet">
-    <button type="button" class="sheet-x" data-close="errorOverlay" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
+    <span class="sheet-grab" aria-hidden="true"></span>
+    <button type="button" class="sheet-x" data-close="errorOverlay" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    <span class="sheet-badge badge-critical" aria-hidden="true"><svg class="i"><use href="#i-triangle-alert"/></svg></span>
     <h2 id="errorTitle">Couldn't send</h2>
     <p class="sheet-sub" id="errorMessage">Network error.</p>
     <p class="sheet-note">Nothing was lost. Retry sends the exact same case.</p>
-    <button type="button" class="btn-primary" id="retryBtn">Retry</button>
+    <button type="button" class="btn-primary" id="retryBtn"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg><span>Retry</span></button>
     <button type="button" class="btn-ghost" id="backBtn">Back to form</button>
   </div>
 </div>
 
 <div class="overlay" id="outboxOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="outboxTitle">
   <div class="sheet">
-    <button type="button" class="sheet-x" data-close="outboxOverlay" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
+    <span class="sheet-grab" aria-hidden="true"></span>
+    <button type="button" class="sheet-x" data-close="outboxOverlay" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    <span class="sheet-badge badge-caution" aria-hidden="true"><svg class="i"><use href="#i-wifi-off"/></svg></span>
     <h2 id="outboxTitle">Queued cases</h2>
     <p class="sheet-sub" id="outboxInfo">No signal. These send themselves the moment you have a connection.</p>
     <div class="recent-list" id="outboxList"></div>
-    <button type="button" class="btn-primary" id="tryFlushBtn">Send now</button>
+    <button type="button" class="btn-primary" id="tryFlushBtn"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg><span>Send now</span></button>
     <button type="button" class="btn-ghost" id="discardQueuedBtn">Discard queued cases</button>
   </div>
 </div>
 
 <div class="overlay" id="photoSheet" hidden role="dialog" aria-modal="true" aria-labelledby="photoSheetTitle">
   <div class="sheet">
-    <button type="button" class="sheet-x" data-close="photoSheet" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
+    <span class="sheet-grab" aria-hidden="true"></span>
+    <button type="button" class="sheet-x" data-close="photoSheet" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
     <h2 id="photoSheetTitle">Add a photo</h2>
     <p class="sheet-sub">Compressed on this device before it is sent. Up to four per case.</p>
     <div class="source-grid">
       <button type="button" class="source-card" id="photoCameraBtn">
-        <span class="source-glyph" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1.1-1.8A1 1 0 0 1 9.2 3.7h5.6a1 1 0 0 1 .9.5L16.8 6h1.7A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5Z"/>
-            <circle cx="12" cy="12.5" r="3.4"/>
-          </svg>
-        </span>
+        <span class="source-glyph" aria-hidden="true"><svg class="i"><use href="#i-camera"/></svg></span>
         <b>Capture a picture</b>
         <small>Use the camera now</small>
       </button>
       <button type="button" class="source-card" id="photoGalleryBtn">
-        <span class="source-glyph" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="5" width="18" height="14" rx="2.4"/><circle cx="8.5" cy="10" r="1.6"/><path d="m4 17 4.8-4.6a1.6 1.6 0 0 1 2.2 0L16 17"/><path d="m13.8 14.6 1.7-1.6a1.6 1.6 0 0 1 2.2 0L20 15.2"/>
-          </svg>
-        </span>
+        <span class="source-glyph" aria-hidden="true"><svg class="i"><use href="#i-image"/></svg></span>
         <b>Choose from gallery</b>
         <small>Pick an existing image</small>
       </button>
@@ -544,36 +660,10 @@
   </div>
 </div>
 
-<div class="overlay" id="delayOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="delayTitle">
-  <div class="sheet">
-    <button type="button" class="sheet-x" data-close="delayOverlay" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
-    <h2 id="delayTitle">Report a delay</h2>
-    <p class="sheet-sub">The receiving hospital sees this on its board straight away.</p>
-    <div class="delay-reasons" id="delayReasons" role="radiogroup" aria-label="Reason">
-      <button type="button" class="chip" role="radio" aria-checked="true" data-reason="traffic">Traffic</button>
-      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="road_blocked">Road blocked</button>
-      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="vehicle_issue">Vehicle problem</button>
-      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="patient_deteriorating">Patient deteriorating</button>
-      <button type="button" class="chip" role="radio" aria-checked="false" data-reason="other">Other</button>
-    </div>
-    <div class="delay-reasons" id="delayMinutes" role="radiogroup" aria-label="Extra time">
-      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="5">+5 min</button>
-      <button type="button" class="chip" role="radio" aria-checked="true" data-minutes="10">+10 min</button>
-      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="20">+20 min</button>
-      <button type="button" class="chip" role="radio" aria-checked="false" data-minutes="">Not sure</button>
-    </div>
-    <p class="sheet-note" id="delayStatus" role="status"></p>
-    <button type="button" class="btn-primary" id="delaySendBtn">Tell the hospital</button>
-  </div>
-</div>
-
 <div class="overlay" id="editOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="editTitle">
   <div class="sheet sheet-tall">
-    <button type="button" class="sheet-x" data-close="editOverlay" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
-    </button>
+    <span class="sheet-grab" aria-hidden="true"></span>
+    <button type="button" class="sheet-x" data-close="editOverlay" aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
     <h2 id="editTitle">Update patient</h2>
     <p class="sheet-sub">The accepting hospital sees these changes immediately. The case code does not change.</p>
 
@@ -589,19 +679,24 @@
     </div>
 
     <span class="field-label">Blood group <span class="opt-mark">If known</span></span>
-    <div class="chip-row" id="editBloodRow">
+    <!-- All eight groups, matching the alert form: a crew that learns the
+         patient is A− after sending must be able to say so. -->
+    <div class="chip-row chip-grid" id="editBloodRow">
       <button type="button" class="chip chip-xs" data-blood="O+">O+</button>
       <button type="button" class="chip chip-xs" data-blood="O-">O−</button>
       <button type="button" class="chip chip-xs" data-blood="A+">A+</button>
+      <button type="button" class="chip chip-xs" data-blood="A-">A−</button>
       <button type="button" class="chip chip-xs" data-blood="B+">B+</button>
+      <button type="button" class="chip chip-xs" data-blood="B-">B−</button>
       <button type="button" class="chip chip-xs" data-blood="AB+">AB+</button>
+      <button type="button" class="chip chip-xs" data-blood="AB-">AB−</button>
     </div>
 
     <span class="field-label" id="editConsciousnessLabel">Consciousness</span>
     <div class="levels levels-compact" id="editConsciousness" role="radiogroup" aria-labelledby="editConsciousnessLabel">
-      <button type="button" class="level" data-value="Conscious" role="radio" aria-checked="false"><span class="level-text"><b>Conscious</b></span></button>
-      <button type="button" class="level" data-value="Semi-Conscious" role="radio" aria-checked="false"><span class="level-text"><b>Semi-conscious</b></span></button>
-      <button type="button" class="level" data-value="Unconscious" role="radio" aria-checked="false"><span class="level-text"><b>Unconscious</b></span></button>
+      <button type="button" class="level" data-value="Conscious" role="radio" aria-checked="false"><span class="level-dot level-good" aria-hidden="true"></span><span class="level-text"><b>Conscious</b></span></button>
+      <button type="button" class="level" data-value="Semi-Conscious" role="radio" aria-checked="false"><span class="level-dot level-caution" aria-hidden="true"></span><span class="level-text"><b>Semi-conscious</b></span></button>
+      <button type="button" class="level" data-value="Unconscious" role="radio" aria-checked="false"><span class="level-dot level-critical" aria-hidden="true"></span><span class="level-text"><b>Unconscious</b></span></button>
     </div>
 
     <span class="field-label" id="editBpLabel">Blood pressure <span class="unit">mmHg</span></span>
@@ -614,7 +709,7 @@
     <div class="edit-vitals">
       <span class="coord-field"><label class="field-label" for="editHr">Heart rate</label><input type="number" id="editHr" class="input" inputmode="numeric"></span>
       <span class="coord-field"><label class="field-label" for="editRr">Resp rate</label><input type="number" id="editRr" class="input" inputmode="numeric"></span>
-      <span class="coord-field"><label class="field-label" for="editSpo2">SpO<sub>2</sub></label><input type="number" id="editSpo2" class="input" inputmode="numeric"></span>
+      <span class="coord-field"><label class="field-label" for="editSpo2"><span>SpO<sub>2</sub></span></label><input type="number" id="editSpo2" class="input" inputmode="numeric"></span>
       <span class="coord-field"><label class="field-label" for="editGlc">Glucose</label><input type="number" id="editGlc" class="input" inputmode="numeric"></span>
     </div>
 
@@ -622,7 +717,7 @@
     <textarea id="editNotes" class="input textarea" maxlength="500" rows="2"></textarea>
 
     <p class="sheet-note" id="editStatus" role="status"></p>
-    <button type="button" class="btn-primary" id="editSaveBtn">Save changes</button>
+    <button type="button" class="btn-primary" id="editSaveBtn"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg><span>Save changes</span></button>
     <button type="button" class="btn-ghost" id="editCancelBtn">Cancel</button>
   </div>
 </div>
@@ -632,5 +727,6 @@
 <script src="config.js"></script>
 <script src="vendor/socket.io.min.js"></script>
 <script src="app.js"></script>
+<script src="ui.js"></script>
 </body>
 </html>

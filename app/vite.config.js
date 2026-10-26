@@ -68,7 +68,9 @@ function classicScriptTags() {
     transformIndexHtml(html) {
       let out = html
         .replace(/\stype="module"/g, '')
-        .replace(/\scrossorigin/g, '')
+        /* Not on the font preload: a font is always fetched in CORS mode, and a
+           preload without crossorigin is fetched twice. */
+        .replace(/(<(?:script|link rel="stylesheet")[^>]*)\scrossorigin/g, '$1')
         .replace(/(<script[^>]*\ssrc=")\.\//g, '$1')
         .replace(/(<link[^>]*\shref=")\.\//g, '$1');
 
@@ -80,7 +82,12 @@ function classicScriptTags() {
       const entry = /[ \t]*<script src="app\.js"><\/script>\s*/;
       if (entry.test(out)) {
         out = out.replace(entry, '');
-        out = out.replace(/<\/body>/, '<script src="app.js"></script>\n</body>');
+        /* After config.js and socket.io, before ui.js (the presentation
+           layer, which only reads the DOM app.js keeps up to date). */
+        const ui = /<script src="ui\.js"><\/script>/;
+        out = ui.test(out)
+          ? out.replace(ui, '<script src="app.js"></script>\n<script src="ui.js"></script>')
+          : out.replace(/<\/body>/, '<script src="app.js"></script>\n</body>');
       }
       return out;
     },
