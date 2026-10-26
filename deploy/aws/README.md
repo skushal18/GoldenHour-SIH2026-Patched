@@ -1,50 +1,115 @@
-# GoldenHour on AWS
+# GoldenHour on AWS — three tiers
 
-Live: **https://d31kwkffv9iv72.cloudfront.net** (`/hospital`, `/admin`, `/ambulance`, `/health`)
+Live: **https://d1k7k7ahunvfhc.cloudfront.net** — `/hospital` (ER desk), `/hospital/#activate` (first-time activation), `/admin`, `/ambulance`, `/health`.
 
-Everything is in account `109933871250`, region **ap-southeast-2 (Sydney)** — the only region this account may use. Every resource is tagged `Project=GoldenHour`.
+Account `109933871250`, region **ap-southeast-2 (Sydney)** only. Everything is one CloudFormation stack, **`goldenhour`**, defined in [`infra/goldenhour.yaml`](../../infra/goldenhour.yaml); every resource is tagged `Project=GoldenHour`.
 
-| Resource | ID / value | Notes |
+```text
+                     Ambulance app (APK / web)          ER desks · admin console (browser)
+                                   │  HTTPS                         │  HTTPS
+                                   ▼                                ▼
+ ┌──────────────────────── CloudFront  ESD4D0YHVEK9M  d1k7k7ahunvfhc.cloudfront.net ────────────────────────┐
+ │  HTTP → HTTPS redirect · security headers · TLS                                                          │
+ │   default (*)           → S3 origin (OAC)        cached, /x/ → /x/index.html (function goldenhour-index) │
+ │   /api/* /socket.io/* /health → Beanstalk origin  no cache, all viewer headers + query, WebSockets       │
+ └───────────────┬───────────────────────────────────────────────────────┬──────────────────────────────────┘
+   PRESENTATION  │                                         APPLICATION    │ HTTP :80 (CloudFront prefix list only)
+                 ▼                                                         ▼
+   S3 goldenhour-web-109933871250 (private)      Elastic Beanstalk goldenhour-prod (Node.js 22, AL2023, arm64)
+   /index.html /hospital/ /admin/                 t4g.micro single instance · nginx (WebSocket upgrade) → Node :8080
+   /ambulance/ /vendor/                           reads secrets with its instance role ──► Secrets Manager
+                                                                │ MySQL :3306, TLS (RDS CA), from the app SG only
+                                                   DATA         ▼
+                                                  RDS for MySQL 8.4  goldenhour-db  db.t4g.micro, 20 GB gp3,
+                                                  encrypted, private subnets (no internet route), not public
+```
+
+## Resources
+
+| Tier | Resource | ID / value |
 |---|---|---|
-| EC2 instance | `i-04a337bf8a7adf656` (`t4g.small`, Amazon Linux 2023 arm64, 20 GB gp3) | Name tag `goldenhour` |
-| Elastic IP | `52.64.219.180` (`eipalloc-0dfad13823fd82e6b`) | Keeps the origin address fixed across stop/start |
-| Security group | `sg-07d01f03ac0ab235c` (`goldenhour-web`) | Port 8080 from CloudFront's origin-facing prefix list `pl-b8a742d1` only; no SSH |
-| IAM role / instance profile | `goldenhour-ec2-role` | `AmazonSSMManagedInstanceCore` — Session Manager access |
-| CloudFront | `EXTEH411I2R7O` → `d31kwkffv9iv72.cloudfront.net` | Origin `ec2-52-64-219-180.ap-southeast-2.compute.amazonaws.com:8080` (HTTP); CachingDisabled + AllViewer policies; redirects HTTP→HTTPS; WebSockets pass through |
+| Presentation | CloudFront distribution | `ESD4D0YHVEK9M` → `d1k7k7ahunvfhc.cloudfront.net` (PriceClass_200, HTTP/2+3, IPv6) |
+| | Origin access control | `E3S67IJWQVPXBA` (`goldenhour-web`) |
+| | CloudFront function | `goldenhour-index` (directory index + `/hospital` → `/hospital/`) |
+| | Response headers policy | `goldenhour-web` (CSP, HSTS, nosniff, DENY framing, Permissions-Policy) |
+| | S3 site bucket | `goldenhour-web-109933871250` (private, OAC only, TLS only) |
+| Application | Beanstalk application / environment | `goldenhour` / `goldenhour-prod` |
+| | Environment URL (origin) | `goldenhour-109933871250.ap-southeast-2.elasticbeanstalk.com` → EIP `32.236.253.166` (EB-managed) |
+| | Instance | `i-0ed3b145e455266b1` (t4g.micro, replaced by Beanstalk as needed) |
+| | Platform | Node.js 22 on 64-bit Amazon Linux 2023 6.11.12, managed minor updates Sun 20:30 UTC |
+| | Security group | `sg-0284eb2e3c59d7d95` `goldenhour-app` — TCP 80 from `pl-b8a742d1` (CloudFront origin-facing) only; EB's default SG disabled |
+| | IAM | `goldenhour-eb-service` (service role), `goldenhour-eb-instance` (instance role + profile: web tier, SSM, read the two secrets) |
+| | Logs | CloudWatch `/aws/elasticbeanstalk/goldenhour-prod/*` (14 days) |
+| Data | RDS instance | `goldenhour-db` — MySQL 8.4, `goldenhour-db.ctsiws0ykcw6.ap-southeast-2.rds.amazonaws.com:3306`, database `goldenhour` |
+| | Subnets | `subnet-0bba6ea31cc784de8` (172.31.48.0/24, 2a), `subnet-0a11f797a7b564ab1` (172.31.49.0/24, 2b), route table `rtb-0ef431677349397cc` (local only) |
+| | Security group | `sg-03d8f1252503db775` `goldenhour-db` — TCP 3306 from `goldenhour-app` only |
+| Secrets | RDS master secret (RDS-managed, rotates) | `rds!db-7647de29-71bc-434c-b64c-9c589e28a673` |
+| | App secret | `goldenhour/app` — `JWT_SECRET` (48 random bytes), `SUPER_ADMIN_USERNAME`, `SUPER_ADMIN_PASSWORD`; filled once by Lambda `goldenhour-secret-seeder` |
+| Monitoring | Health probe | Lambda `goldenhour-health-probe`, every 5 min (rule `goldenhour-health-probe`), GET `/health`, fails unless healthy on MySQL |
+| | Alarms → SNS `goldenhour-alerts` (email) | `goldenhour-health-failing` (2 failed probes), `goldenhour-db-cpu-high` (>80 % 15 min), `goldenhour-db-storage-low` (<2 GiB) |
+| | Budget | `goldenhour-monthly` US$20 — email at 80 % and 100 % actual, 100 % forecast |
+| Deploy | Artifacts bucket | `goldenhour-artifacts-109933871250` (`backend/*.zip`, `cfn/goldenhour.yaml`) |
+
+No secret value is in the code, git, the template, stack outputs, environment variables or logs: the Beanstalk environment holds only the two secret **ARNs** and `backend/src/start.js` reads them at boot with the instance role (`backend/src/config/awsSecrets.js`). A rotated RDS password reaches the connection pool within 5 minutes without a restart.
+
+## First sign-in
+
+1. **Administrator**: AWS console → Secrets Manager → `goldenhour/app` → *Retrieve secret value*. Sign in at `/admin` with `SUPER_ADMIN_USERNAME` / `SUPER_ADMIN_PASSWORD`; you must choose a new password at once. (The secret keeps the first password; it is only used to create the administrator on an empty database.)
+2. **Hospitals**: *Hospital accounts* → **Create logins for all hospitals**. A CSV with one activation code per hospital downloads once (codes are stored only as hashes, expire after 7 days, work once). Send each hospital its code; it opens `/hospital/#activate`, enters the code and chooses its own username and password, then signs in with exactly those. Re-issue a code from the same list when one expires or is lost.
+3. Confirm the **SNS subscription email** ("AWS Notification - Subscription Confirmation") so alarms reach you.
 
 ## How deploys work
 
-`git push` to **Patch-2** → within ~3 minutes the server pulls it, runs `npm ci` and restarts (`goldenhour-update.timer`). Check `/var/log/goldenhour-deploys.log` or `/health`.
+- **GitHub Actions** — `.github/workflows/deploy-aws.yml` runs on every push to `Patch-2`: tests (including MySQL 8.4), `infra/scripts/build.sh`, upload the bundle, new Beanstalk version, S3 sync, CloudFront invalidation, smoke test of `/health`. It authenticates with GitHub OIDC (role `goldenhour-github-deploy`, trusted only for `repo:skushal18/GoldenHour-SIH2026-Patched:ref:refs/heads/Patch-2`) — no AWS keys in GitHub.
+  **Blocked today:** this account's organisation SCP (`p-8ptlsm3g`) denies every `iam:*OpenIDConnectProvider*` action, so the OIDC provider cannot be created. Until the organisation owner allows it, the deploy job skips with a notice. Once allowed: update the stack with `GitHubOidc=create`, then set the repository variable `AWS_DEPLOY_ROLE_ARN` to the `DeployRoleArn` output.
+- **From a laptop** with the AWS CLI signed in: `infra/scripts/deploy.sh` (backend + front-ends) or `infra/scripts/deploy.sh web`.
+- **The APK** reads `app/www/config.js` (`SERVER_BASE: "https://d1k7k7ahunvfhc.cloudfront.net"`, `CORS_ORIGIN=https://localhost` on the server). GitHub → Actions → **Build GoldenHour APK** builds it; it also runs on pushes to `Patch-2` that touch `app/`. The web copy at `/ambulance` uses the page's own origin.
 
-The APK talks to the address in `app/www/config.js`. Change that only if the CloudFront address changes, then rebuild the APK (GitHub → Actions → **Build GoldenHour APK**).
-
-## On the server
-
-Connect: AWS console → EC2 → instance → **Connect → Session Manager** (or Systems Manager → Session Manager).
+## Stop between demos (cost option B)
 
 ```bash
-sudo systemctl status goldenhour           # app
-sudo journalctl -u goldenhour -n 100       # app log
-sudo systemctl restart goldenhour          # restart
-sudo /usr/local/bin/goldenhour-update      # deploy now instead of waiting
-sudo cat /var/log/goldenhour-deploys.log   # deploy history
-sudo nano /etc/goldenhour.env              # settings (then restart)
-sudo mysql goldenhour                      # database
+infra/scripts/power.sh stop     # instance → 0, RDS stopped, health probe paused  (~US$4/month while stopped)
+infra/scripts/power.sh start    # ~10 minutes; RDS start is the slow part
+infra/scripts/power.sh status
 ```
+
+RDS starts itself again after 7 days stopped — run `stop` again. Data in RDS is kept.
+
+## Costs (Sydney, on demand, from the AWS Pricing API)
+
+| Item | US$/month running |
+|---|---:|
+| Beanstalk t4g.micro ($0.0106/h) | 7.74 |
+| 10 GB gp3 root volume | 0.96 |
+| Public IPv4 (EB Elastic IP) | 3.65 |
+| RDS db.t4g.micro MySQL ($0.025/h) | 18.25 |
+| RDS 20 GB gp3 ($0.138/GB) | 2.76 |
+| Secrets Manager (2 secrets) | 0.80 |
+| CloudWatch logs + 3 alarms, Lambda, S3, CloudFront (free allowance), Budgets | ~1.10 |
+| **Running all month** | **≈ 35** |
+| **Stopped** (EIP, disks, secrets, RDS storage) | **≈ 4** |
+
+Run it only for demos and it stays under ~US$25. MySQL 8.4 (not 8.0) on purpose: 8.0 left standard support on 31 July 2026 and would add RDS Extended Support charges (≈ US$150/month for this instance); the template also sets `EngineLifecycleSupport: open-source-rds-extended-support-disabled`.
+
+**Free plan limit:** automated backups are capped at **1 day** on the AWS Free plan (RDS refused 7). After upgrading the account to the Paid plan (the credit still applies), update the stack with `DbBackupRetentionDays=7`.
+
+## Operating
+
+- **Logs**: CloudWatch → Log groups → `/aws/elasticbeanstalk/goldenhour-prod/var/log/web.stdout.log` (app), `.../nginx/access.log`.
+- **Shell**: EC2 → instance → Connect → Session Manager. App in `/var/app/current`; `sudo systemctl restart web`.
+- **Hospitals**: the `hospitals` table is the network. `HOSPITAL_SEED_ON_BOOT=true` loads `data/hospitals/network_hospitals.csv` into an empty table at boot; by hand: `cd /var/app/current && npm --prefix backend run seed:hospitals` (idempotent). Add more from the admin console → Directory → *Add hospitals from the national list*.
+- **End-to-end check** (on the instance, via Session Manager or SSM Run Command): `cd /var/app/current && eval "$(/opt/elasticbeanstalk/bin/get-config environment | node -e 'const e=JSON.parse(require("fs").readFileSync(0,"utf8"));for(const[k,v] of Object.entries(e))console.log("export "+k+"="+JSON.stringify(String(v)))')" && node backend/scripts/e2e-aws.js https://d1k7k7ahunvfhc.cloudfront.net` — it never prints a secret, and leaves the administrator as it found it.
 
 ## Rebuild from scratch
 
-1. IAM role + instance profile `goldenhour-ec2-role` with `AmazonSSMManagedInstanceCore`.
-2. Security group in the default VPC: TCP 8080 from prefix list `com.amazonaws.global.cloudfront.origin-facing`.
-3. Launch `t4g.small`, AMI from SSM parameter `/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64`, IMDSv2 required, 20 GB encrypted gp3, the role above, user data = [`ec2-user-data.sh`](ec2-user-data.sh).
-4. Allocate an Elastic IP and associate it.
-5. CloudFront distribution: custom origin = the instance's public DNS name, HTTP only, port 8080, read timeout 60 s; default behaviour: redirect to HTTPS, all methods, cache policy `Managed-CachingDisabled`, origin request policy `Managed-AllViewer`.
-6. If the CloudFront domain changed, update `SERVER_BASE` in `app/www/config.js`, push, rebuild the APK.
+See [`infra/README.md`](../../infra/README.md): one `CreateStack` (or `UpdateStack`) with `infra/goldenhour.yaml`, then one deploy.
 
-Setup takes ~3 minutes after the instance starts (`/var/log/goldenhour-setup.log` ends with `SETUP-DONE`).
+## Previous deployment (EC2) — still running until you retire it
 
-## Cost (Free plan, $100 credit until April 2027)
+| Resource | ID |
+|---|---|
+| EC2 | `i-04a337bf8a7adf656` (t4g.small, MariaDB on the instance), Elastic IP `52.64.219.180` (`eipalloc-0dfad13823fd82e6b`) |
+| CloudFront | `EXTEH411I2R7O` → `d31kwkffv9iv72.cloudfront.net` |
+| Security group / IAM | `sg-07d01f03ac0ab235c` (`goldenhour-web`), role + profile `goldenhour-ec2-role` |
 
-Roughly: EC2 `t4g.small` ~US$12/month, Elastic IP ~US$3.60/month, 20 GB gp3 ~US$1.90/month, CloudFront within its free allowance at hackathon traffic — about **US$17/month from the credit**. Stop the instance when not demoing to save the EC2 part (the Elastic IP is still billed).
-
-The database lives on the instance's disk: terminating the instance deletes it. The five built-in logins come back on any fresh server; logins created in the admin console do not.
+It pulls `Patch-2` every 3 minutes. **When v7 is merged into `Patch-2`, that server runs v7 too**: its `hospitals` table is empty (it has no `HOSPITAL_SEED_ON_BOOT`), so it matches no hospital, and the old built-in logins are retired there. Retire it (terminate the instance, release the Elastic IP, disable then delete the distribution, delete the security group and IAM role) before or right after merging — ~US$17/month.

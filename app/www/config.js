@@ -9,7 +9,7 @@
    Inside the Android APK there is no server to infer, so put the server
    laptop's LAN address here before you run `npm run apk`:
 
-       SERVER_BASE: "https://d31kwkffv9iv72.cloudfront.net"
+       SERVER_BASE: "https://d1k7k7ahunvfhc.cloudfront.net"
 
    Find that address by starting the backend — it prints it in the banner.
 
@@ -20,7 +20,7 @@
 
 window.GH_CONFIG = {
   /* "" = auto-detect from the page URL. Set explicitly for the APK. */
-  SERVER_BASE: "https://d31kwkffv9iv72.cloudfront.net",
+  SERVER_BASE: "https://d1k7k7ahunvfhc.cloudfront.net",
 
   API_PATH: "/api/v1",
 

@@ -15,8 +15,9 @@
    a WebSocket; a case broadcast from the ambulance API reaches that desk; the
    desk accepts; crew GPS reaches the desk; arrival closes the case; a second
    case is cancelled. The test hospital (imported from the national list for
-   this run) is switched off and its login disabled afterwards, so the 100
-   network hospitals are untouched.
+   this run) and its login are removed afterwards, so the 100 network
+   hospitals are untouched. (It is switched off first, so the running server —
+   which reloads the table at its next start — never offers it a case.)
    ========================================================================== */
 'use strict';
 const crypto = require('crypto');
@@ -150,7 +151,8 @@ async function main() {
     step('harness', false, err.message);
   } finally {
     sockets.forEach(s => { try { s.close(); } catch (_) {} });
-    /* Leave nothing behind but the audit trail. */
+    /* Leave nothing behind but the audit trail and the two closed test cases:
+       the test login and the test hospital are removed from RDS. */
     if (admin && testAccountId) {
       const d = await call('POST', '/api/v1/admin/accounts/' + testAccountId + '/disable', {}, admin).catch(() => ({}));
       step('cleanup: the test login is disabled', d.status === 200);
@@ -164,7 +166,10 @@ async function main() {
       const pool = require('../src/config/db');
       const [r] = await pool.query('UPDATE accounts SET password_hash=?, must_change_password=1, token_version=token_version+1 WHERE username=? AND role=\'SUPER_ADMIN\'',
         [await bcrypt.hash(adminPass, Number(process.env.BCRYPT_ROUNDS) || 11), adminUser]);
+      if (testAccountId) await pool.query("DELETE FROM accounts WHERE account_id=? AND role='HOSPITAL_STAFF' AND created_by=?", [testAccountId, adminUser]);
+      if (testHospitalId) await pool.query('DELETE FROM hospitals WHERE id=?', [testHospitalId]);
       await pool.end();
+      step('cleanup: the test login and test hospital are removed from RDS', true);
       step('cleanup: the administrator is back to the Secrets Manager password, must change it at next sign-in', r.affectedRows === 1);
     }
     const failed = results.filter(r => !r.ok).length;
