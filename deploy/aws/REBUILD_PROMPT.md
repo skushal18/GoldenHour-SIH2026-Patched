@@ -1,6 +1,6 @@
 # Prompt: rebuild GoldenHour as a 3-tier AWS application
 
-Paste everything inside the block into Claude Code, opened on this repository (branch `Patch-2`), after running `aws login` for account 109933871250.
+Works in Claude Code on the web (cloud session, AWS connector enabled) or in Claude Code with the AWS CLI signed in to account 109933871250. Open this repository on branch `Patch-2` and paste everything inside the block.
 
 ```text
 You are rebuilding GoldenHour (SIH 2026 emergency pre-arrival system: ambulance app → hospital ER desks) as a three-tier application fully managed on AWS. Read README.md, deploy/aws/README.md and backend/src first, and keep every existing feature and test working.
@@ -8,7 +8,8 @@ You are rebuilding GoldenHour (SIH 2026 emergency pre-arrival system: ambulance 
 ## AWS context
 - Account 109933871250, region ap-southeast-2 (Sydney) ONLY — other regions are blocked by an organisation policy.
 - Free plan with about US$100 credit. Keep the monthly run cost under ~US$25. Before creating anything, give me a cost estimate per resource and wait for my OK.
-- Tag every resource Project=GoldenHour. Define ALL infrastructure as code with AWS CDK (TypeScript) in a new infra/ folder so the whole stack can be rebuilt with one `cdk deploy`.
+- Tag every resource Project=GoldenHour. Define ALL infrastructure as code in a new infra/ folder so the whole stack can be rebuilt in one step: use AWS CDK (TypeScript) if the shell has working AWS CLI credentials; if you are in a cloud session where AWS is reached through the AWS MCP tools instead, write a CloudFormation template (infra/goldenhour.yaml) and deploy it with CloudFormation CreateStack/UpdateStack through those tools. Upload any build artefacts (backend zip, front-end files) to S3 with presigned URLs.
+- Region is ap-southeast-2 for every call, including the AWS CLI default region.
 - The current deployment (EC2 i-04a337bf8a7adf656 + CloudFront EXTEH411I2R7O, see deploy/aws/README.md) must keep running until the new stack is verified. Never delete it without asking me.
 
 ## Target architecture (3 tiers)
@@ -40,7 +41,7 @@ You are rebuilding GoldenHour (SIH 2026 emergency pre-arrival system: ambulance 
 ## Quality bar
 - Run `npm run setup && npm test` before every push; add tests for: the RDS hospital directory, bulk login creation, activation (code expiry, single use, username uniqueness, password rules) and that a hospital sees only its own cases.
 - After deploying, prove it end to end through the public HTTPS address: /health shows store mysql and the RDS host; sign in as admin; create logins; activate one hospital with a chosen username/password; broadcast a test case from the ambulance app; accept it on that hospital's desk; check live GPS and arrival; check the Socket.IO connection is websocket. Then cancel/close the test case.
-- Update README.md and deploy/aws/README.md with the new architecture (a diagram), every resource ID, how deploys work, costs, and how to rebuild with CDK.
+- Update README.md and deploy/aws/README.md with the new architecture (a diagram), every resource ID, how deploys work, costs, and how to rebuild from infra/.
 
 ## How to work with me
 - Work in small steps and tell me what you are about to create before you create it. Ask me before anything that costs money, deletes data, or changes the live site.
