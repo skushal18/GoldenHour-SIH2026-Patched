@@ -1529,3 +1529,92 @@ button:disabled:active{ transform: none; }
 .call-ahead-row a{ white-space: nowrap; font-weight: var(--w-semi); min-height: var(--tap); display: inline-flex; align-items: center;
   padding: 0 14px; border-radius: var(--r-pill); color: var(--accent-ink); border: 1px solid var(--accent-line); text-decoration: none; }
 .delay-reasons{ display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px; }
+
+/* ══ Motion: smooth and bouncy ════════════════════════════════════════════
+   Real spring curves (a damped spring sampled into linear()), so things
+   overshoot a little and settle instead of stopping dead:
+     --spring-gentle  ~1% overshoot — for long travel (sheets rising the full screen)
+     --spring-soft    ~8% overshoot — for short travel (screens, the tab pill)
+     --spring-bouncy  ~23% overshoot — for small scale changes (a button
+                      springing back after a press, chips, badges, toasts)
+   Old WebViews without linear() get close cubic-bezier stand-ins. Everything
+   here animates transform/opacity only, so it stays smooth on cheap phones,
+   and the reduced-motion block above still switches all of it off.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root{
+  --spring-soft:   cubic-bezier(.3,1.25,.5,1);
+  --spring-bouncy: cubic-bezier(.34,1.6,.5,1);
+  --spring-gentle: cubic-bezier(.25,1.08,.5,1);
+  --press-in: cubic-bezier(.3,0,.5,1);
+}
+@supports (transition-timing-function: linear(0, 1)){
+  :root{
+    --spring-soft:   linear(0, 0.02, 0.073, 0.1494, 0.241, 0.3407, 0.443, 0.5433, 0.6381, 0.7252, 0.803, 0.8705, 0.9276, 0.9745, 1.0116, 1.0398, 1.06, 1.0733, 1.0808, 1.0835, 1.0823, 1.0783, 1.0722, 1.0647, 1.0564, 1.0479, 1.0395, 1.0315, 1.0241, 1.0175, 1.0117, 1.0068, 1.0027, 0.9995, 0.997, 0.9952, 0.994, 0.9933, 0.993, 0.9931, 0.9934, 0.9939, 0.9945, 0.9952, 0.9959, 0.9966, 0.9973, 0.9979, 1);
+    --spring-gentle: linear(0, 0.0162, 0.0583, 0.1182, 0.1892, 0.2662, 0.3452, 0.4232, 0.4982, 0.5686, 0.6334, 0.6922, 0.7448, 0.7912, 0.8316, 0.8664, 0.896, 0.9209, 0.9416, 0.9586, 0.9723, 0.9832, 0.9917, 0.9982, 1.003, 1.0064, 1.0087, 1.0102, 1.0109, 1.0111, 1.0109, 1.0104, 1.0098, 1.009, 1.0081, 1.0072, 1.0064, 1.0055, 1.0048, 1.004, 1);
+    --spring-bouncy: linear(0, 0.0433, 0.1563, 0.3136, 0.492, 0.6719, 0.8381, 0.9798, 1.0908, 1.1689, 1.2152, 1.2331, 1.2275, 1.2042, 1.1694, 1.1283, 1.086, 1.0462, 1.0117, 0.984, 0.964, 0.9515, 0.946, 0.9461, 0.9508, 0.9584, 0.9678, 0.9777, 0.9872, 0.9956, 1.0024, 1.0075, 1.0108, 1.0125, 1.0127, 1.0118, 1.0102, 1.008, 1.0057, 1.0035, 1.0015, 0.9998, 0.9985, 0.9976, 0.9971, 0.997, 0.9972, 0.9975, 1);
+  }
+}
+
+/* Press and release: sink fast, spring back with a bounce. */
+.btn-primary, .btn-secondary, .btn-ghost, .chip, .chip-xs, .seg-btn, .level, .band,
+.photo-add, .photo-remove, .source-card, .sheet-x, .quick-row{
+  transition: background-color var(--d-base) var(--ease), border-color var(--d-base) var(--ease),
+              color var(--d-base) var(--ease), box-shadow var(--d-base) var(--ease),
+              filter var(--d-base) var(--ease), transform 620ms var(--spring-bouncy);
+}
+.btn-primary:active, .btn-secondary:active, .btn-ghost:active, .chip:active, .chip-xs:active, .seg-btn:active,
+.level:active, .band:active, .photo-add:active, .photo-remove:active, .source-card:active, .sheet-x:active, .quick-row:active{
+  transition: background-color var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease),
+              color var(--d-fast) var(--ease), box-shadow var(--d-fast) var(--ease),
+              filter var(--d-fast) var(--ease), transform 110ms var(--press-in);
+}
+.btn-primary:active, .btn-secondary:active, .btn-ghost:active{ transform: scale(.955); }
+.chip:active, .chip-xs:active, .seg-btn:active, .band:active, .source-card:active{ transform: scale(.93); }
+.quick-row:active{ transform: scale(.975); }
+.level:active{ transform: scale(.97); }
+
+/* Choosing something: the chip itself gives a little hop, the tick pops. */
+.chip.is-on, .chip-xs.is-on, .delay-reasons .chip[aria-checked="true"], .seg-btn.is-on, .band.is-on{
+  animation: hop 520ms var(--spring-bouncy);
+}
+.chip.is-on::before, .delay-reasons .chip[aria-checked="true"]::before{ animation: pop 520ms var(--spring-bouncy); }
+@keyframes hop{ 0%{ transform: scale(.9); } 100%{ transform: none; } }
+
+/* Tab bar: the glass pill glides with a soft spring, the icon bounces up. */
+.tab-ink{ transition: transform 640ms var(--spring-soft), opacity var(--d-base) var(--ease); }
+.tab-glyph{ transition: transform 560ms var(--spring-bouncy); }
+.tab:active .tab-glyph{ transform: scale(.82); transition-duration: 110ms; transition-timing-function: var(--press-in); }
+
+/* Screens: content floats up and settles, card by card. */
+.view > *{ animation: rise-spring 700ms var(--spring-soft) both; }
+@keyframes rise-spring{ from{ opacity: 0; transform: translateY(26px) scale(.97); } 45%{ opacity: 1; } to{ opacity: 1; transform: none; } }
+
+/* Sheets: slide up with a gentle overshoot; the badge pops in with a wobble. */
+.sheet{ animation: sheet-spring 640ms var(--spring-gentle); }
+@keyframes sheet-spring{ from{ transform: translateY(105%); } to{ transform: none; } }
+.sheet-badge{ animation: badge-pop 760ms var(--spring-bouncy) 120ms both; }
+@keyframes badge-pop{ 0%{ transform: scale(.2) rotate(-18deg); opacity: 0; } 30%{ opacity: 1; } 100%{ transform: none; opacity: 1; } }
+
+/* Status changes land with a bounce: waiting → accepted is the moment that matters. */
+/* One animation per status, so the chip bounces again each time the status changes. */
+.status-pending{ animation: hop 600ms var(--spring-bouncy); }
+.status-accepted{ animation: hop-big 760ms var(--spring-bouncy); }
+.status-failed{ animation: hop-again 600ms var(--spring-bouncy); }
+@keyframes hop-big{ 0%{ transform: scale(.8); } 100%{ transform: none; } }
+@keyframes hop-again{ 0%{ transform: scale(.9); } 100%{ transform: none; } }
+.accepted-box:not([hidden]), .call-ahead:not([hidden]){ animation: land 720ms var(--spring-bouncy) both; }
+@keyframes land{ from{ opacity: 0; transform: translateY(14px) scale(.9); } 35%{ opacity: 1; } to{ opacity: 1; transform: none; } }
+
+/* Toasts drop in and bounce. */
+.toast{ animation: toast-spring 620ms var(--spring-bouncy); }
+@keyframes toast-spring{ from{ opacity: 0; transform: translate(-50%, 22px) scale(.86); } 30%{ opacity: 1; } to{ opacity: 1; transform: translate(-50%, 0); } }
+
+/* Home: the siren badge sways now and then, and the main button breathes. */
+.hero-badge{ animation: badge-pop 900ms var(--spring-bouncy) 200ms both, sway 5.5s ease-in-out 1.6s infinite; transform-origin: 50% 20%; }
+@keyframes sway{ 0%, 84%, 100%{ transform: none; } 88%{ transform: rotate(-11deg); } 92%{ transform: rotate(9deg); } 96%{ transform: rotate(-4deg); } }
+.hero .btn-primary{ animation: breathe-cta 3.2s ease-in-out 1.2s infinite; }
+@keyframes breathe-cta{
+  0%, 100%{ box-shadow: 0 12px 26px -12px rgba(239,125,32,.75), 0 2px 4px rgba(174,87,15,.18), inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 0 rgba(174,87,15,.22); }
+  50%{ box-shadow: 0 16px 36px -10px rgba(239,125,32,.95), 0 2px 4px rgba(174,87,15,.18), inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 0 rgba(174,87,15,.22); }
+}
+.hero .btn-primary:active{ animation: none; }
