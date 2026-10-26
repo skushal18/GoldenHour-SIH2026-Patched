@@ -64,6 +64,11 @@ Parameters:
     Default: 'true'
     AllowedValues: ['true', 'false']
     Description: Load data/hospitals/network_hospitals.csv into an empty hospitals table at boot (idempotent).
+  IdleStopMinutes:
+    Type: Number
+    Default: 120
+    MinValue: 30
+    Description: Put the app server to sleep and stop the database after this long without a real request. The first request after that wakes it (~8-10 minutes).
   GitHubOidc:
     Type: String
     Default: none
@@ -506,11 +511,23 @@ Resources:
             S3OriginConfig: { OriginAccessIdentity: '' }
           - Id: api
             DomainName: !Sub goldenhour-${AWS::AccountId}.${AWS::Region}.elasticbeanstalk.com
+            # Asleep there is nothing to connect to: answer 504 fast so the
+            # clients call /wake instead of hanging for 30 s.
+            ConnectionAttempts: 1
+            ConnectionTimeout: 4
             CustomOriginConfig:
               OriginProtocolPolicy: http-only
               HTTPPort: 80
               OriginReadTimeout: 60
               OriginKeepaliveTimeout: 5
+          - Id: waker
+            DomainName: !Select [2, !Split ['/', !GetAtt WakerUrl.FunctionUrl]]
+            OriginAccessControlId: !GetAtt WakerOac.Id
+            CustomOriginConfig: { OriginProtocolPolicy: https-only, HTTPSPort: 443 }
+        CustomErrorResponses:
+          - { ErrorCode: 502, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 503, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 504, ErrorCachingMinTTL: 0 }
         DefaultCacheBehavior:
           TargetOriginId: web
           ViewerProtocolPolicy: redirect-to-https
@@ -537,6 +554,12 @@ Resources:
             Compress: false
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+          - PathPattern: /wake
+            TargetOriginId: waker
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           - PathPattern: /health
             TargetOriginId: api
             ViewerProtocolPolicy: redirect-to-https
@@ -544,6 +567,193 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+
+  # ==========================================================================
+  # Sleep when idle, wake on demand. The sleeper checks /health every 15
+  # minutes; after IdleStopMinutes with no real request it scales the
+  # Beanstalk instance to 0, stops RDS and pauses the health probe. While
+  # asleep the API answers 504 and the clients (ER desk, admin console,
+  # ambulance app) call /wake, which CloudFront sends to the waker: it starts
+  # RDS and the instance. The ambulance app's outbox holds a case until then.
+  # ==========================================================================
+  PowerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: goldenhour-power
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: autoscaling:DescribeAutoScalingGroups
+                Resource: '*'
+              - Effect: Allow
+                Action: autoscaling:UpdateAutoScalingGroup
+                Resource: '*'
+                Condition: { StringEquals: { 'autoscaling:ResourceTag/elasticbeanstalk:environment-name': goldenhour-prod } }
+              - Effect: Allow
+                Action: [rds:DescribeDBInstances, rds:StartDBInstance, rds:StopDBInstance]
+                Resource: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:db:goldenhour-db'
+              - Effect: Allow
+                Action: [events:EnableRule, events:DisableRule]
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/goldenhour-health-probe'
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SleeperLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/goldenhour-idle-sleeper, RetentionInDays: 14, Tags: [{ Key: Project, Value: GoldenHour }] }
+
+  Sleeper:
+    Type: AWS::Lambda::Function
+    DependsOn: SleeperLogs
+    Properties:
+      FunctionName: goldenhour-idle-sleeper
+      Description: Every 15 min - after IdleStopMinutes without a request, instance to 0, RDS stopped, probe paused
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 30
+      Role: !GetAtt PowerRole.Arn
+      Environment:
+        Variables:
+          HEALTH_URL: !Sub 'https://${Distribution.DomainName}/health'
+          IDLE_MINUTES: !Ref IdleStopMinutes
+          DB_ID: goldenhour-db
+          PROBE_RULE: goldenhour-health-probe
+      Code:
+        ZipFile: |
+          import json, os, urllib.request
+          import boto3
+          asg, rds, ev = boto3.client('autoscaling'), boto3.client('rds'), boto3.client('events')
+          DB, RULE = os.environ['DB_ID'], os.environ['PROBE_RULE']
+
+          def group():
+              f = [{'Name': 'tag:elasticbeanstalk:environment-name', 'Values': ['goldenhour-prod']}]
+              return asg.describe_auto_scaling_groups(Filters=f)['AutoScalingGroups'][0]
+
+          def handler(event, context):
+              g = group()
+              db = rds.describe_db_instances(DBInstanceIdentifier=DB)['DBInstances'][0]['DBInstanceStatus']
+              if g['MaxSize'] < 1:
+                  if db == 'available':   # RDS restarts itself after 7 days stopped
+                      rds.stop_db_instance(DBInstanceIdentifier=DB)
+                      print('asleep: the database had restarted itself; stopped it again')
+                  return {'state': 'asleep', 'db': db}
+              try:
+                  req = urllib.request.Request(os.environ['HEALTH_URL'], headers={'User-Agent': 'goldenhour-idle-sleeper'})
+                  with urllib.request.urlopen(req, timeout=15) as r:
+                      h = json.loads(r.read())
+              except Exception as e:
+                  print('awake, /health not answering yet: ' + type(e).__name__)
+                  return {'state': 'starting', 'db': db}
+              if h.get('success'):
+                  ev.enable_rule(Name=RULE)
+              idle = int(h.get('idle_seconds') or 0)
+              if idle < int(os.environ['IDLE_MINUTES']) * 60:
+                  return {'state': 'awake', 'idle_seconds': idle}
+              ev.disable_rule(Name=RULE)
+              asg.update_auto_scaling_group(AutoScalingGroupName=g['AutoScalingGroupName'], MinSize=0, MaxSize=0, DesiredCapacity=0)
+              if db == 'available':
+                  rds.stop_db_instance(DBInstanceIdentifier=DB)
+              print('idle for %d s: asleep now (instance 0, database stopping, probe paused)' % idle)
+              return {'state': 'sleeping', 'idle_seconds': idle}
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SleeperSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: goldenhour-idle-sleeper
+      Description: Checks every 15 minutes whether GoldenHour has been idle long enough to sleep
+      ScheduleExpression: rate(15 minutes)
+      State: ENABLED
+      Targets: [{ Id: sleeper, Arn: !GetAtt Sleeper.Arn }]
+
+  SleeperPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Sleeper
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SleeperSchedule.Arn
+
+  WakerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/goldenhour-waker, RetentionInDays: 14, Tags: [{ Key: Project, Value: GoldenHour }] }
+
+  Waker:
+    Type: AWS::Lambda::Function
+    DependsOn: WakerLogs
+    Properties:
+      FunctionName: goldenhour-waker
+      Description: GET https://<cloudfront>/wake - starts RDS and the Beanstalk instance if asleep
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 20
+      Role: !GetAtt PowerRole.Arn
+      Environment: { Variables: { DB_ID: goldenhour-db } }
+      Code:
+        ZipFile: |
+          import json, os
+          import boto3
+          asg, rds = boto3.client('autoscaling'), boto3.client('rds')
+          DB = os.environ['DB_ID']
+
+          def handler(event, context):
+              started = []
+              try:
+                  if rds.describe_db_instances(DBInstanceIdentifier=DB)['DBInstances'][0]['DBInstanceStatus'] == 'stopped':
+                      rds.start_db_instance(DBInstanceIdentifier=DB)
+                      started.append('database')
+                  f = [{'Name': 'tag:elasticbeanstalk:environment-name', 'Values': ['goldenhour-prod']}]
+                  g = asg.describe_auto_scaling_groups(Filters=f)['AutoScalingGroups'][0]
+                  if g['MaxSize'] < 1:
+                      asg.update_auto_scaling_group(AutoScalingGroupName=g['AutoScalingGroupName'], MinSize=1, MaxSize=1, DesiredCapacity=1)
+                      started.append('server')
+              except Exception as e:
+                  print('wake failed: ' + type(e).__name__ + ': ' + str(e)[:200])
+              print('wake: ' + (', '.join(started) or 'nothing to start'))
+              msg = ('GoldenHour is starting (' + ' and '.join(started) + '). Ready in about 8-10 minutes.') if started else 'GoldenHour is awake or already starting.'
+              return {'statusCode': 202 if started else 200, 'headers': {'content-type': 'application/json', 'cache-control': 'no-store'},
+                      'body': json.dumps({'success': True, 'starting': started, 'message': msg})}
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  WakerUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt Waker.Arn
+      AuthType: AWS_IAM
+
+  WakerOac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: goldenhour-waker
+        Description: CloudFront signs requests to the waker function URL
+        OriginAccessControlOriginType: lambda
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WakerUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Waker
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      FunctionUrlAuthType: AWS_IAM
+      SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  WakerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Waker
+      Action: lambda:InvokeFunction
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
 
   # ==========================================================================
   # Monitoring: a probe calls https://<cloudfront>/health every 5 minutes and

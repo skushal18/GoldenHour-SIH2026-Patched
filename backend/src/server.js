@@ -96,6 +96,17 @@ app.use('/', express.static(path.join(PUBLIC_DIR, 'landing')));
 app.use('/vendor', express.static(path.join(APP_DIR, 'vendor')));
 app.use('/vendor', express.static(path.join(PUBLIC_DIR, 'vendor')));
 
+/* ── Activity ──────────────────────────────────────────────────────────────
+   When the last real request arrived — any API call or new realtime
+   connection, not /health. On AWS a scheduled job reads it from /health and
+   puts the stack to sleep after IDLE_STOP_MINUTES without any (see
+   infra/goldenhour.yaml, IdleSleeper). An open ER desk polls every 10 s, so
+   it keeps the stack awake, which is what a desk waiting for ambulances needs. */
+let lastActivity = Date.now();
+function touch() { lastActivity = Date.now(); }
+app.use('/api', (req, res, next) => { touch(); next(); });
+io.on('connection', touch);
+
 /* ── API ───────────────────────────────────────────────────────────────── */
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/admin', adminRoutes);
@@ -131,6 +142,8 @@ app.get('/health', async (req, res) => {
     directory_hospitals: directory.count(),
     directory_source: directory.summary().source,
     uptime_seconds: Math.round(process.uptime()),
+    last_activity_at: new Date(lastActivity).toISOString(),
+    idle_seconds: Math.round((Date.now() - lastActivity) / 1000),
   };
   if (hospitalsConfig.HACKATHON_MODE && security.deskAuthMode() === 'ip') {
     body.laptops = hospitalsConfig.HOSPITAL_LAPTOPS.map(h => ({ id: h.hospital_id, name: h.name, ip: h.ip }));

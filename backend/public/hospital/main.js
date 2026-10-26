@@ -163,7 +163,7 @@
   function resume(attempt) {
     GH.api('/auth/me').then(route).catch(function (e) {
       if (!e.network) { GH.saveSession(null); return showLogin(); }
-      showLogin('Cannot reach the GoldenHour server — retrying…');
+      showLogin(e.status ? e.message : 'Cannot reach the GoldenHour server — retrying…');
       setTimeout(function () { if (GH.session() && !$('#viewLogin').hidden) resume(attempt + 1); }, Math.min(30000, 3000 * (attempt + 1)));
     });
   }

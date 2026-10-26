@@ -60,6 +60,20 @@ async function main() {
   const admin = (await call('POST', '/api/v1/auth/change-password',
     { current_password: 'correct horse battery staple', new_password: 'admin pass for tests 2026' }, first.body.token)).body.token;
 
+  group('Activity tracking (for sleeping when idle)');
+  const h1 = await call('GET', '/health');
+  await check('/health reports when the last real request came in', () => {
+    assert.ok(h1.body.last_activity_at && Number.isInteger(h1.body.idle_seconds));
+    assert.ok(h1.body.idle_seconds <= 5, 'just signed in');
+  });
+  const before = h1.body.last_activity_at;
+  await new Promise(r => setTimeout(r, 1100));
+  const h2 = await call('GET', '/health');
+  await check('/health itself does not count as activity', () => assert.strictEqual(h2.body.last_activity_at, before));
+  await call('GET', '/api/v1/case-types');
+  const h3 = await call('GET', '/health');
+  await check('an API request does', () => assert.ok(h3.body.last_activity_at > before));
+
   group('The administrator creates logins for every hospital at once');
   const bulk = await call('POST', '/api/v1/admin/accounts/activation-codes', {}, admin);
   const codes = new Map((bulk.body.created || []).map(c => [c.hospital_id, c]));
