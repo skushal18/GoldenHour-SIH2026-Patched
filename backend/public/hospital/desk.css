@@ -148,6 +148,15 @@ button { cursor: pointer; }
 .status-change { color: var(--warn-ink); background: #FCE7C4; }
 .status-disabled { color: var(--c-muted); background: #EDF0F4; }
 .status-locked { color: var(--crit-ink); background: var(--crit-wash); }
+.status-pending { color: #1F4E9A; background: #E3ECFB; }
+.bulk-box { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 20px; }
+.bulk-box .bulk-text { flex: 1 1 320px; }
+.bulk-box .sub { margin: 4px 0 0; font-size: 13px; color: var(--c-muted); }
+.h1-sub { margin: 0; font-size: 20px; font-weight: 600; }
+.c-choice { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.c-choice legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
+.c-choice label { display: flex; gap: 8px; align-items: flex-start; line-height: 1.35; }
+.c-choice input { margin-top: 2px; }
 .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 7px 0; border-bottom: 1px solid #EDF0F4; }
 .kv:last-child { border-bottom: 0; }
 .kv b { font-weight: 600; }

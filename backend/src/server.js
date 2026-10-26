@@ -66,10 +66,13 @@ const io = new Server(server, {
   maxHttpBufferSize: 12e6,
 });
 
-/* Railway (and any proxy) terminates TLS, so req.ip must come from the
-   forwarded header or every client looks like the proxy — which would make
-   rate limiting throttle everybody at once. */
-app.set('trust proxy', 1);
+/* A proxy terminates TLS, so req.ip must come from the forwarded header or
+   every client looks like the proxy — which would make rate limiting throttle
+   everybody at once. TRUST_PROXY is the number of proxies in front of this
+   process: 1 behind CloudFront alone, 2 behind CloudFront + the Elastic
+   Beanstalk nginx. Too high lets a client forge its address; too low makes
+   everyone share one. */
+app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
 app.disable('x-powered-by');
 
 app.use(securityHeaders);
@@ -93,6 +96,17 @@ app.use('/', express.static(path.join(PUBLIC_DIR, 'landing')));
 app.use('/vendor', express.static(path.join(APP_DIR, 'vendor')));
 app.use('/vendor', express.static(path.join(PUBLIC_DIR, 'vendor')));
 
+/* ── Activity ──────────────────────────────────────────────────────────────
+   When the last real request arrived — any API call or new realtime
+   connection, not /health. On AWS a scheduled job reads it from /health and
+   puts the stack to sleep after IDLE_STOP_MINUTES without any (see
+   infra/goldenhour.yaml, IdleSleeper). An open ER desk polls every 10 s, so
+   it keeps the stack awake, which is what a desk waiting for ambulances needs. */
+let lastActivity = Date.now();
+function touch() { lastActivity = Date.now(); }
+app.use('/api', (req, res, next) => { touch(); next(); });
+io.on('connection', touch);
+
 /* ── API ───────────────────────────────────────────────────────────────── */
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/admin', adminRoutes);
@@ -113,6 +127,7 @@ app.get('/health', async (req, res) => {
     store = active.driver;
     storeHealthy = typeof active.ping === 'function' ? await active.ping() : true;
   } catch (_) { /* not initialised yet */ }
+  const pool = getPool();
 
   const body = {
     success: storeHealthy,
@@ -121,10 +136,14 @@ app.get('/health', async (req, res) => {
     env: security.envName(),
     store,
     store_healthy: storeHealthy,
+    database: pool && pool.settings ? { host: pool.settings.host, name: pool.settings.database } : null,
     desk_auth: security.deskAuthMode(),
     hackathon_mode: hospitalsConfig.HACKATHON_MODE,
     directory_hospitals: directory.count(),
+    directory_source: directory.summary().source,
     uptime_seconds: Math.round(process.uptime()),
+    last_activity_at: new Date(lastActivity).toISOString(),
+    idle_seconds: Math.round((Date.now() - lastActivity) / 1000),
   };
   if (hospitalsConfig.HACKATHON_MODE && security.deskAuthMode() === 'ip') {
     body.laptops = hospitalsConfig.HOSPITAL_LAPTOPS.map(h => ({ id: h.hospital_id, name: h.name, ip: h.ip }));
@@ -141,10 +160,19 @@ const PORT = Number(process.env.PORT) || 5000;
 
 (async () => {
   try {
-    const loaded = directory.load();
-    console.log('🏥 Hospital directory: ' + loaded.toLocaleString('en-IN') + ' hospitals');
     await initStore();
     const pool = getPool();
+    if (pool) {
+      if (String(process.env.HOSPITAL_SEED_ON_BOOT || '').toLowerCase() === 'true') {
+        const seeded = await directory.seedNetwork(pool);
+        if (seeded.inserted) console.log('🏥 Seeded ' + seeded.inserted + ' network hospitals into MySQL');
+      }
+      const n = await directory.attach(pool);
+      console.log('🏥 Hospital directory: ' + n + ' hospitals (MySQL hospitals table)');
+      if (!n) console.warn('⚠️  The hospitals table is empty — no ambulance can be matched. Run: npm --prefix backend run seed:hospitals');
+    } else {
+      console.log('🏥 Hospital directory: ' + directory.useMemory() + ' hospitals (data/hospitals/network_hospitals.csv, in memory)');
+    }
     if (pool) {
       const caps = await capacity.attachPersistence(pool);
       const evts = await audit.attachPersistence(pool);

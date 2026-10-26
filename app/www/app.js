@@ -936,6 +936,8 @@
       demo,
       reason,
       serverBase: base,
+      /* Where the server lives (base or page origin): /wake hangs off it. */
+      serverRoot: root || null,
       apiRoot: root ? root + apiPath : null,
       realtime: cfg.REALTIME !== false,
       pollMs: Number(cfg.POLL_MS) > 0 ? Number(cfg.POLL_MS) : 4e3,
@@ -1408,8 +1410,21 @@
       shouldFail: () => !!win.__GH_DEMO_FAIL
     }) : createLiveTransport(env.apiRoot || "", (url, opts) => {
       if (typeof win.fetch !== "function") return Promise.reject(new NetworkError("No fetch in this runtime"));
-      return win.fetch(url, opts);
+      return win.fetch(url, opts).then((res) => {
+        if (res.status >= 502 && res.status <= 504) wakeServer();
+        return res;
+      }, (err) => {
+        wakeServer();
+        throw err;
+      });
     });
+    let lastWake = 0;
+    function wakeServer() {
+      if (!env.serverRoot || typeof win.fetch !== "function" || Date.now() - lastWake < 6e4) return;
+      lastWake = Date.now();
+      win.fetch(env.serverRoot + "/wake", { mode: "no-cors", cache: "no-store" }).catch(() => {
+      });
+    }
     const outbox = createOutbox(storage, {
       onRejected: (entry) => toast("A queued case was refused by the server and discarded")
     });

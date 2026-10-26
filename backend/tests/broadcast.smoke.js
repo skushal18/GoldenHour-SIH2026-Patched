@@ -8,7 +8,6 @@ process.env.PORT = process.env.TEST_PORT || '5099';
 process.env.DB_DRIVER = 'memory';
 process.env.DESK_AUTH = 'ip';          // LAN rehearsal identity; auth.test.js covers sign-in
 process.env.DEMO_SEED = 'false';
-process.env.ACCOUNT_SEED_FILE = '/nonexistent/no-seed.json';   // isolate from backend/seed
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const assert = require('assert');

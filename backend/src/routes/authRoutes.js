@@ -5,9 +5,13 @@
    GET  /api/v1/auth/me               the signed-in account and its hospital
    POST /api/v1/auth/change-password  { current_password, new_password } → fresh session
    POST /api/v1/auth/logout           ends every session of this login
+   POST /api/v1/auth/activate/lookup  { code } → which hospital the activation code is for
+   POST /api/v1/auth/activate         { code, username, password } → the hospital's first session
 
    There is no public registration: accounts are created by an administrator
-   (routes/adminRoutes.js) or at first run (authService.bootstrap).
+   (routes/adminRoutes.js) or at first run (authService.bootstrap). A
+   hospital whose login was created with an activation code chooses its own
+   username and password here.
    ========================================================================== */
 'use strict';
 const express = require('express');
@@ -21,6 +25,8 @@ const audit = require('../services/auditService');
 /* Per client address. The per-account lockout in authService is what stops a
    guess against one login from many addresses. */
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 30, name: 'sign-in attempts' });
+/* Codes are 80 random bits, so this is about noise, not about guessing. */
+const activationLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 20, name: 'activation attempts' });
 
 router.post('/login', loginLimiter, async (req, res, next) => {
   try {
@@ -53,6 +59,29 @@ router.post('/change-password', loginLimiter, requireAuth(null, { allowPasswordC
 router.post('/logout', requireAuth(null, { allowPasswordChange: true }), async (req, res, next) => {
   try { await auth.signOutEverywhere(req.account); res.json({ success: true }); }
   catch (err) { next(err); }
+});
+
+router.post('/activate/lookup', activationLimiter, async (req, res, next) => {
+  try {
+    const result = await auth.lookupActivation((req.body || {}).code);
+    if (!result.ok) return res.status(result.status).json({ success: false, reason: result.reason, message: result.message });
+    res.json({ success: true, hospital: result.hospital, expires_at: result.expires_at });
+  } catch (err) { next(err); }
+});
+
+router.post('/activate', activationLimiter, async (req, res, next) => {
+  try {
+    const { code, username, password } = req.body || {};
+    const result = await auth.activate(code, username, password);
+    if (!result.ok) {
+      if (['INVALID_CODE', 'CODE_EXPIRED'].includes(result.reason)) {
+        audit.record('AUTH', 'ACTIVATION_FAILED', { reason: result.reason }, { kind: 'auth' });
+      }
+      return res.status(result.status).json({ success: false, reason: result.reason, message: result.message });
+    }
+    audit.record('AUTH', 'ACCOUNT_ACTIVATED', { username: result.session.account.username, hospital_id: result.session.account.hospital_id }, { kind: 'auth' });
+    res.status(201).json(Object.assign({ success: true }, result.session));
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

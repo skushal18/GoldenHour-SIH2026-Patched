@@ -80,6 +80,8 @@ export function resolveEnvironment(options) {
     demo,
     reason,
     serverBase: base,
+    /* Where the server lives (base or page origin): /wake hangs off it. */
+    serverRoot: root || null,
     apiRoot: root ? root + apiPath : null,
     realtime: cfg.REALTIME !== false,
     pollMs: Number(cfg.POLL_MS) > 0 ? Number(cfg.POLL_MS) : 4000,

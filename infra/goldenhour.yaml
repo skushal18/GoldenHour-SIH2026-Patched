@@ -1,0 +1,994 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  GoldenHour (SIH 2026) - three tiers in ap-southeast-2. Presentation: private
+  S3 + CloudFront (OAC). Application: Elastic Beanstalk Node.js 22 single
+  instance behind CloudFront. Data: RDS for MySQL 8.4 in private subnets.
+  Secrets in Secrets Manager, logs and alarms in CloudWatch, a monthly budget.
+  Rebuild everything with one CreateStack; see infra/README.md.
+
+# ----------------------------------------------------------------------------
+# Every resource is tagged Project=GoldenHour by the stack-level tag (pass
+# Tags=[{Key: Project, Value: GoldenHour}] on CreateStack) and again below
+# where a resource takes tags of its own.
+# ----------------------------------------------------------------------------
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-0e6bbada21a96a076
+    Description: The VPC (the account's default VPC).
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Default: subnet-0b54a93d67430e5c3,subnet-0fcaa60dd1c92280a
+    Description: Public subnets for the Beanstalk instance (it needs a public IP to reach Secrets Manager and GitHub without a NAT gateway).
+  DbSubnetCidrA:
+    Type: String
+    Default: 172.31.48.0/24
+  DbSubnetCidrB:
+    Type: String
+    Default: 172.31.49.0/24
+  CloudFrontOriginPrefixList:
+    Type: String
+    Default: pl-b8a742d1
+    Description: com.amazonaws.global.cloudfront.origin-facing in ap-southeast-2.
+  PlatformArn:
+    Type: String
+    Default: arn:aws:elasticbeanstalk:ap-southeast-2::platform/Node.js 22 running on 64bit Amazon Linux 2023/6.11.12
+  InstanceType:
+    Type: String
+    Default: t4g.micro
+    AllowedValues: [t4g.micro, t4g.small]
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+  DbEngineVersion:
+    Type: String
+    Default: '8.4'
+    Description: MySQL 8.4 LTS. 8.0 left standard support on 31 July 2026 and would bill RDS Extended Support.
+  DbBackupRetentionDays:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 35
+    Description: >-
+      Automated backup retention. The AWS Free plan allows only 1 day; after upgrading the
+      account to the Paid plan (the credit still applies), set 7.
+  AlertEmail:
+    Type: String
+    Default: kushal.sentheel@gmail.com
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 20
+  HospitalSeedOnBoot:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Load data/hospitals/network_hospitals.csv into an empty hospitals table at boot (idempotent).
+  IdleStopMinutes:
+    Type: Number
+    Default: 120
+    MinValue: 30
+    Description: Put the app server to sleep and stop the database after this long without a real request. The first request after that wakes it (~8-10 minutes).
+  GitHubOidc:
+    Type: String
+    Default: none
+    AllowedValues: [none, create, existing]
+    Description: >-
+      GitHub Actions deploy role. "create" also creates the token.actions.githubusercontent.com
+      OIDC provider; "existing" uses one already in the account; "none" skips both
+      (this account's organisation SCP currently denies iam:*OpenIDConnectProvider*).
+  GitHubRepo:
+    Type: String
+    Default: skushal18/GoldenHour-SIH2026-Patched
+  GitHubBranch:
+    Type: String
+    Default: Patch-2
+
+Conditions:
+  WantDeployRole: !Not [!Equals [!Ref GitHubOidc, none]]
+  CreateOidcProvider: !Equals [!Ref GitHubOidc, create]
+
+Resources:
+  # ==========================================================================
+  # Network: two private subnets for RDS (no route out at all) and two
+  # security groups. The Beanstalk instance takes port 80 from CloudFront's
+  # origin-facing addresses only; the database takes 3306 from that instance only.
+  # ==========================================================================
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags: [{ Key: Name, Value: goldenhour-private }, { Key: Project, Value: GoldenHour }]
+
+  DbSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref DbSubnetCidrA
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: goldenhour-db-a }, { Key: Project, Value: GoldenHour }]
+
+  DbSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref DbSubnetCidrB
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: goldenhour-db-b }, { Key: Project, Value: GoldenHour }]
+
+  DbSubnetARoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref DbSubnetA, RouteTableId: !Ref PrivateRouteTable }
+
+  DbSubnetBRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref DbSubnetB, RouteTableId: !Ref PrivateRouteTable }
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: goldenhour-db
+      DBSubnetGroupDescription: GoldenHour RDS - private subnets, no internet route
+      SubnetIds: [!Ref DbSubnetA, !Ref DbSubnetB]
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: goldenhour-app
+      GroupDescription: GoldenHour Beanstalk instance - HTTP from CloudFront only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !Ref CloudFrontOriginPrefixList
+          Description: CloudFront origin-facing
+      Tags: [{ Key: Name, Value: goldenhour-app }, { Key: Project, Value: GoldenHour }]
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: goldenhour-db
+      GroupDescription: GoldenHour RDS - MySQL from the Beanstalk instance only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+          Description: GoldenHour Beanstalk instance
+      Tags: [{ Key: Name, Value: goldenhour-db }, { Key: Project, Value: GoldenHour }]
+
+  # ==========================================================================
+  # Secrets. The RDS master password is RDS-managed (Secrets Manager). The
+  # app secret holds JWT_SECRET (48 random bytes) and the first administrator's
+  # password; SecretSeeder fills them in once, inside AWS, and never returns
+  # or logs a value.
+  # ==========================================================================
+  AppSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: goldenhour/app
+      Description: GoldenHour JWT_SECRET and first SUPER_ADMIN login (SUPER_ADMIN_USERNAME / SUPER_ADMIN_PASSWORD)
+      SecretString: '{"SUPER_ADMIN_USERNAME":"admin"}'
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SecretSeederRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: fill-app-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
+                Resource: !Ref AppSecret
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SecretSeederFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: goldenhour-secret-seeder
+      Description: Fills JWT_SECRET and SUPER_ADMIN_PASSWORD into goldenhour/app once. Never logs values.
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 30
+      Role: !GetAtt SecretSeederRole.Arn
+      Code:
+        ZipFile: |
+          import json, secrets, urllib.request
+          import boto3
+
+          ALPHABET = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+          def respond(event, status, reason):
+              body = json.dumps({'Status': status, 'Reason': reason,
+                  'PhysicalResourceId': event.get('PhysicalResourceId') or 'goldenhour-app-secret-seed',
+                  'StackId': event['StackId'], 'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'], 'Data': {}}).encode()
+              req = urllib.request.Request(event['ResponseURL'], data=body, method='PUT', headers={'Content-Type': ''})
+              urllib.request.urlopen(req, timeout=15)
+
+          def handler(event, context):
+              try:
+                  if event['RequestType'] in ('Create', 'Update'):
+                      sm = boto3.client('secretsmanager')
+                      arn = event['ResourceProperties']['SecretArn']
+                      cur = json.loads(sm.get_secret_value(SecretId=arn)['SecretString'] or '{}')
+                      filled = []
+                      if not cur.get('JWT_SECRET'):
+                          cur['JWT_SECRET'] = secrets.token_urlsafe(48)
+                          filled.append('JWT_SECRET')
+                      if not cur.get('SUPER_ADMIN_PASSWORD'):
+                          pw = ''.join(secrets.choice(ALPHABET) for _ in range(20))
+                          cur['SUPER_ADMIN_PASSWORD'] = '-'.join([pw[0:5], pw[5:10], pw[10:15], pw[15:20]])
+                          filled.append('SUPER_ADMIN_PASSWORD')
+                      if filled:
+                          sm.put_secret_value(SecretId=arn, SecretString=json.dumps(cur))
+                      print('filled: ' + (', '.join(filled) or 'nothing (already set)'))
+                  respond(event, 'SUCCESS', 'ok')
+              except Exception as e:
+                  print('failed: ' + type(e).__name__)
+                  respond(event, 'FAILED', 'secret seeding failed: ' + type(e).__name__)
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SecretSeederLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/goldenhour-secret-seeder
+      RetentionInDays: 14
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  AppSecretValues:
+    Type: Custom::GoldenHourSecretSeed
+    DependsOn: SecretSeederLogs
+    Properties:
+      ServiceToken: !GetAtt SecretSeederFunction.Arn
+      SecretArn: !Ref AppSecret
+
+  # ==========================================================================
+  # Data tier: RDS for MySQL, single-AZ db.t4g.micro, 20 GB gp3, encrypted,
+  # automated backups (DbBackupRetentionDays), private, master password
+  # managed by RDS.
+  # ==========================================================================
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: goldenhour-db
+      Engine: mysql
+      EngineVersion: !Ref DbEngineVersion
+      EngineLifecycleSupport: open-source-rds-extended-support-disabled
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: '20'
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: goldenhour
+      MasterUsername: ghadmin
+      ManageMasterUserPassword: true
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: !Ref DbBackupRetentionDays
+      PreferredBackupWindow: '16:00-16:45'            # 21:30-22:15 IST
+      PreferredMaintenanceWindow: 'sun:17:00-sun:17:45'
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      DeletionProtection: true
+      EnablePerformanceInsights: false
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  # ==========================================================================
+  # Application tier: Elastic Beanstalk, Node.js 22 on Amazon Linux 2023,
+  # single instance, managed platform updates, enhanced health on /health,
+  # logs streamed to CloudWatch. The app reads its secrets with the instance
+  # role (backend/src/config/awsSecrets.js) - the environment holds only ARNs.
+  # ==========================================================================
+  EbServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goldenhour-eb-service
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: elasticbeanstalk.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition: { StringEquals: { 'sts:ExternalId': elasticbeanstalk } }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkManagedUpdatesCustomerRolePolicy
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  EbInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goldenhour-eb-instance
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: ec2.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-goldenhour-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref AppSecret, !GetAtt Database.MasterUserSecret.SecretArn]
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  EbInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: goldenhour-eb-instance
+      Roles: [!Ref EbInstanceRole]
+
+  Application:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: goldenhour
+      Description: GoldenHour backend (Express + Socket.IO)
+      ResourceLifecycleConfig:
+        ServiceRole: !GetAtt EbServiceRole.Arn
+        VersionLifecycleConfig:
+          MaxCountRule: { Enabled: true, MaxCount: 15, DeleteSourceFromS3: true }
+
+  Environment:
+    Type: AWS::ElasticBeanstalk::Environment
+    DependsOn: AppSecretValues
+    Properties:
+      ApplicationName: !Ref Application
+      EnvironmentName: goldenhour-prod
+      CNAMEPrefix: !Sub goldenhour-${AWS::AccountId}
+      Description: GoldenHour API and realtime (single instance behind CloudFront)
+      PlatformArn: !Ref PlatformArn
+      Tier: { Name: WebServer, Type: Standard }
+      Tags: [{ Key: Project, Value: GoldenHour }]
+      OptionSettings:
+        - { Namespace: 'aws:elasticbeanstalk:environment', OptionName: EnvironmentType, Value: SingleInstance }
+        - { Namespace: 'aws:elasticbeanstalk:environment', OptionName: ServiceRole, Value: !GetAtt EbServiceRole.Arn }
+        - { Namespace: 'aws:elasticbeanstalk:environment:proxy', OptionName: ProxyServer, Value: nginx }
+        - { Namespace: 'aws:ec2:instances', OptionName: InstanceTypes, Value: !Ref InstanceType }
+        - { Namespace: 'aws:ec2:instances', OptionName: SupportedArchitectures, Value: arm64 }
+        - { Namespace: 'aws:autoscaling:launchconfiguration', OptionName: IamInstanceProfile, Value: !Ref EbInstanceProfile }
+        - { Namespace: 'aws:autoscaling:launchconfiguration', OptionName: SecurityGroups, Value: !Ref AppSecurityGroup }
+        - { Namespace: 'aws:autoscaling:launchconfiguration', OptionName: DisableDefaultEC2SecurityGroup, Value: 'true' }
+        - { Namespace: 'aws:autoscaling:launchconfiguration', OptionName: DisableIMDSv1, Value: 'true' }
+        - { Namespace: 'aws:autoscaling:launchconfiguration', OptionName: RootVolumeType, Value: gp3 }
+        - { Namespace: 'aws:autoscaling:launchconfiguration', OptionName: RootVolumeSize, Value: '10' }
+        - { Namespace: 'aws:ec2:vpc', OptionName: VPCId, Value: !Ref VpcId }
+        - { Namespace: 'aws:ec2:vpc', OptionName: Subnets, Value: !Join [',', !Ref PublicSubnetIds] }
+        - { Namespace: 'aws:ec2:vpc', OptionName: AssociatePublicIpAddress, Value: 'true' }
+        - { Namespace: 'aws:elasticbeanstalk:application', OptionName: Application Healthcheck URL, Value: /health }
+        - { Namespace: 'aws:elasticbeanstalk:healthreporting:system', OptionName: SystemType, Value: enhanced }
+        - { Namespace: 'aws:elasticbeanstalk:managedactions', OptionName: ManagedActionsEnabled, Value: 'true' }
+        - { Namespace: 'aws:elasticbeanstalk:managedactions', OptionName: PreferredStartTime, Value: 'Sun:20:30' }
+        - { Namespace: 'aws:elasticbeanstalk:managedactions:platformupdate', OptionName: UpdateLevel, Value: minor }
+        - { Namespace: 'aws:elasticbeanstalk:command', OptionName: DeploymentPolicy, Value: AllAtOnce }
+        - { Namespace: 'aws:elasticbeanstalk:cloudwatch:logs', OptionName: StreamLogs, Value: 'true' }
+        - { Namespace: 'aws:elasticbeanstalk:cloudwatch:logs', OptionName: DeleteOnTerminate, Value: 'false' }
+        - { Namespace: 'aws:elasticbeanstalk:cloudwatch:logs', OptionName: RetentionInDays, Value: '14' }
+        - { Namespace: 'aws:elasticbeanstalk:cloudwatch:logs:health', OptionName: HealthStreamingEnabled, Value: 'true' }
+        - { Namespace: 'aws:elasticbeanstalk:cloudwatch:logs:health', OptionName: RetentionInDays, Value: '14' }
+        # Application settings. No secret here: only where to read them.
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: NODE_ENV, Value: production }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: AWS_REGION, Value: !Ref 'AWS::Region' }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: DB_DRIVER, Value: mysql }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: DB_HOST, Value: !GetAtt Database.Endpoint.Address }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: DB_PORT, Value: !GetAtt Database.Endpoint.Port }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: DB_NAME, Value: goldenhour }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: DB_SSL, Value: rds }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: GH_DB_SECRET_ARN, Value: !GetAtt Database.MasterUserSecret.SecretArn }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: GH_APP_SECRET_ARN, Value: !Ref AppSecret }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: DESK_AUTH, Value: jwt }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: HACKATHON_MODE, Value: 'false' }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: ALLOW_MANUAL_HOSPITAL_OVERRIDE, Value: 'false' }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: CORS_ORIGIN, Value: 'https://localhost' }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: TRUST_PROXY, Value: '2' }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: HOSPITAL_SEED_ON_BOOT, Value: !Ref HospitalSeedOnBoot }
+
+  # ==========================================================================
+  # Presentation tier: private S3 bucket behind CloudFront with Origin Access
+  # Control. /api/*, /socket.io/* and /health go to Beanstalk uncached with
+  # every viewer header and query string (WebSockets pass through).
+  # ==========================================================================
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub goldenhour-web-${AWS::AccountId}
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }] }
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CloudFrontOnly
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${SiteBucket.Arn}/*
+            Condition: { StringEquals: { 'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}' } }
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt SiteBucket.Arn, !Sub '${SiteBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': 'false' } }
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub goldenhour-artifacts-${AWS::AccountId}
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      BucketEncryption: { ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }] }
+      LifecycleConfiguration:
+        Rules: [{ Id: old-uploads, Status: Enabled, Prefix: uploads/, ExpirationInDays: 7 }]
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SiteOac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: goldenhour-web
+        Description: GoldenHour static front-ends
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # /hospital → /hospital/ and /hospital/ → /hospital/index.html (S3 has no directories).
+  IndexFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: goldenhour-index
+      AutoPublish: true
+      FunctionConfig: { Comment: Directory index for the static front-ends, Runtime: cloudfront-js-2.0 }
+      FunctionCode: |
+        function handler(event) {
+          var req = event.request, uri = req.uri;
+          if (uri === '/hospital' || uri === '/admin' || uri === '/ambulance') {
+            return { statusCode: 301, statusDescription: 'Moved Permanently', headers: { location: { value: uri + '/' } } };
+          }
+          if (uri.charAt(uri.length - 1) === '/') req.uri = uri + 'index.html';
+          return req;
+        }
+
+  # The same headers the Express server sets on the pages it serves.
+  SiteHeaders:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: goldenhour-web
+        Comment: Security headers for the GoldenHour front-ends
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            Override: true
+            ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self' ws: wss:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+          ContentTypeOptions: { Override: true }
+          FrameOptions: { FrameOption: DENY, Override: true }
+          ReferrerPolicy: { ReferrerPolicy: no-referrer, Override: true }
+          StrictTransportSecurity: { AccessControlMaxAgeSec: 31536000, IncludeSubdomains: true, Override: true }
+        CustomHeadersConfig:
+          Items:
+            - { Header: Permissions-Policy, Value: 'geolocation=(self), camera=(self), microphone=(), payment=()', Override: true }
+            - { Header: Cross-Origin-Opener-Policy, Value: same-origin, Override: true }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      Tags: [{ Key: Project, Value: GoldenHour }]
+      DistributionConfig:
+        Comment: GoldenHour 3-tier (S3 front-ends + Beanstalk API)
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_200
+        DefaultRootObject: index.html
+        Origins:
+          - Id: web
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt SiteOac.Id
+            S3OriginConfig: { OriginAccessIdentity: '' }
+          - Id: api
+            DomainName: !Sub goldenhour-${AWS::AccountId}.${AWS::Region}.elasticbeanstalk.com
+            # Asleep there is nothing to connect to: answer 504 fast so the
+            # clients call /wake instead of hanging for 30 s.
+            ConnectionAttempts: 1
+            ConnectionTimeout: 4
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 5
+          - Id: waker
+            DomainName: !Select [2, !Split ['/', !GetAtt WakerUrl.FunctionUrl]]
+            OriginAccessControlId: !GetAtt WakerOac.Id
+            CustomOriginConfig: { OriginProtocolPolicy: https-only, HTTPSPort: 443 }
+        CustomErrorResponses:
+          - { ErrorCode: 502, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 503, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 504, ErrorCachingMinTTL: 0 }
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6          # Managed-CachingOptimized
+          ResponseHeadersPolicyId: !Ref SiteHeaders
+          FunctionAssociations: [{ EventType: viewer-request, FunctionARN: !GetAtt IndexFunction.FunctionMetadata.FunctionARN }]
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: false
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad        # Managed-CachingDisabled
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # Managed-AllViewer
+          - PathPattern: /socket.io/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: false
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+          - PathPattern: /wake
+            TargetOriginId: waker
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          - PathPattern: /health
+            TargetOriginId: api
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+
+  # ==========================================================================
+  # Sleep when idle, wake on demand. The sleeper checks /health every 15
+  # minutes; after IdleStopMinutes with no real request it scales the
+  # Beanstalk instance to 0, stops RDS and pauses the health probe. While
+  # asleep the API answers 504 and the clients (ER desk, admin console,
+  # ambulance app) call /wake, which CloudFront sends to the waker: it starts
+  # RDS and the instance. The ambulance app's outbox holds a case until then.
+  # ==========================================================================
+  PowerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: goldenhour-power
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: autoscaling:DescribeAutoScalingGroups
+                Resource: '*'
+              - Effect: Allow
+                Action: autoscaling:UpdateAutoScalingGroup
+                Resource: '*'
+                Condition: { StringEquals: { 'autoscaling:ResourceTag/elasticbeanstalk:environment-name': goldenhour-prod } }
+              - Effect: Allow
+                Action: [rds:DescribeDBInstances, rds:StartDBInstance, rds:StopDBInstance]
+                Resource: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:db:goldenhour-db'
+              - Effect: Allow
+                Action: [events:EnableRule, events:DisableRule]
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/goldenhour-health-probe'
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SleeperLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/goldenhour-idle-sleeper, RetentionInDays: 14, Tags: [{ Key: Project, Value: GoldenHour }] }
+
+  Sleeper:
+    Type: AWS::Lambda::Function
+    DependsOn: SleeperLogs
+    Properties:
+      FunctionName: goldenhour-idle-sleeper
+      Description: Every 15 min - after IdleStopMinutes without a request, instance to 0, RDS stopped, probe paused
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 30
+      Role: !GetAtt PowerRole.Arn
+      Environment:
+        Variables:
+          HEALTH_URL: !Sub 'https://${Distribution.DomainName}/health'
+          IDLE_MINUTES: !Ref IdleStopMinutes
+          DB_ID: goldenhour-db
+          PROBE_RULE: goldenhour-health-probe
+      Code:
+        ZipFile: |
+          import json, os, urllib.request
+          import boto3
+          asg, rds, ev = boto3.client('autoscaling'), boto3.client('rds'), boto3.client('events')
+          DB, RULE = os.environ['DB_ID'], os.environ['PROBE_RULE']
+
+          def group():
+              f = [{'Name': 'tag:elasticbeanstalk:environment-name', 'Values': ['goldenhour-prod']}]
+              return asg.describe_auto_scaling_groups(Filters=f)['AutoScalingGroups'][0]
+
+          def handler(event, context):
+              g = group()
+              db = rds.describe_db_instances(DBInstanceIdentifier=DB)['DBInstances'][0]['DBInstanceStatus']
+              if g['MaxSize'] < 1:
+                  if db == 'available':   # RDS restarts itself after 7 days stopped
+                      rds.stop_db_instance(DBInstanceIdentifier=DB)
+                      print('asleep: the database had restarted itself; stopped it again')
+                  return {'state': 'asleep', 'db': db}
+              try:
+                  req = urllib.request.Request(os.environ['HEALTH_URL'], headers={'User-Agent': 'goldenhour-idle-sleeper'})
+                  with urllib.request.urlopen(req, timeout=15) as r:
+                      h = json.loads(r.read())
+              except Exception as e:
+                  print('awake, /health not answering yet: ' + type(e).__name__)
+                  return {'state': 'starting', 'db': db}
+              if h.get('success'):
+                  ev.enable_rule(Name=RULE)
+              idle = int(h.get('idle_seconds') or 0)
+              if idle < int(os.environ['IDLE_MINUTES']) * 60:
+                  return {'state': 'awake', 'idle_seconds': idle}
+              ev.disable_rule(Name=RULE)
+              asg.update_auto_scaling_group(AutoScalingGroupName=g['AutoScalingGroupName'], MinSize=0, MaxSize=0, DesiredCapacity=0)
+              if db == 'available':
+                  rds.stop_db_instance(DBInstanceIdentifier=DB)
+              print('idle for %d s: asleep now (instance 0, database stopping, probe paused)' % idle)
+              return {'state': 'sleeping', 'idle_seconds': idle}
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  SleeperSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: goldenhour-idle-sleeper
+      Description: Checks every 15 minutes whether GoldenHour has been idle long enough to sleep
+      ScheduleExpression: rate(15 minutes)
+      State: ENABLED
+      Targets: [{ Id: sleeper, Arn: !GetAtt Sleeper.Arn }]
+
+  SleeperPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Sleeper
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SleeperSchedule.Arn
+
+  WakerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/goldenhour-waker, RetentionInDays: 14, Tags: [{ Key: Project, Value: GoldenHour }] }
+
+  Waker:
+    Type: AWS::Lambda::Function
+    DependsOn: WakerLogs
+    Properties:
+      FunctionName: goldenhour-waker
+      Description: GET https://<cloudfront>/wake - starts RDS and the Beanstalk instance if asleep
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 20
+      Role: !GetAtt PowerRole.Arn
+      Environment: { Variables: { DB_ID: goldenhour-db } }
+      Code:
+        ZipFile: |
+          import json, os
+          import boto3
+          asg, rds = boto3.client('autoscaling'), boto3.client('rds')
+          DB = os.environ['DB_ID']
+
+          def handler(event, context):
+              started = []
+              try:
+                  if rds.describe_db_instances(DBInstanceIdentifier=DB)['DBInstances'][0]['DBInstanceStatus'] == 'stopped':
+                      rds.start_db_instance(DBInstanceIdentifier=DB)
+                      started.append('database')
+                  f = [{'Name': 'tag:elasticbeanstalk:environment-name', 'Values': ['goldenhour-prod']}]
+                  g = asg.describe_auto_scaling_groups(Filters=f)['AutoScalingGroups'][0]
+                  if g['MaxSize'] < 1:
+                      asg.update_auto_scaling_group(AutoScalingGroupName=g['AutoScalingGroupName'], MinSize=1, MaxSize=1, DesiredCapacity=1)
+                      started.append('server')
+              except Exception as e:
+                  print('wake failed: ' + type(e).__name__ + ': ' + str(e)[:200])
+              print('wake: ' + (', '.join(started) or 'nothing to start'))
+              msg = ('GoldenHour is starting (' + ' and '.join(started) + '). Ready in about 8-10 minutes.') if started else 'GoldenHour is awake or already starting.'
+              return {'statusCode': 202 if started else 200, 'headers': {'content-type': 'application/json', 'cache-control': 'no-store'},
+                      'body': json.dumps({'success': True, 'starting': started, 'message': msg})}
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  WakerUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt Waker.Arn
+      AuthType: AWS_IAM
+
+  WakerOac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: goldenhour-waker
+        Description: CloudFront signs requests to the waker function URL
+        OriginAccessControlOriginType: lambda
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WakerUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Waker
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      FunctionUrlAuthType: AWS_IAM
+      SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  WakerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Waker
+      Action: lambda:InvokeFunction
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+  # ==========================================================================
+  # Monitoring: a probe calls https://<cloudfront>/health every 5 minutes and
+  # fails unless the server answers healthy on MySQL; two failed probes in a
+  # row alarm by email. RDS CPU and free storage alarm too. Budget at $20/month.
+  # ==========================================================================
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: goldenhour-alerts
+      DisplayName: GoldenHour alerts
+      Subscription: [{ Protocol: email, Endpoint: !Ref AlertEmail }]
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  HealthProbeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  HealthProbeLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/goldenhour-health-probe
+      RetentionInDays: 14
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  HealthProbe:
+    Type: AWS::Lambda::Function
+    DependsOn: HealthProbeLogs
+    Properties:
+      FunctionName: goldenhour-health-probe
+      Description: GET https://<cloudfront>/health; fails unless healthy on MySQL
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 20
+      Role: !GetAtt HealthProbeRole.Arn
+      Environment: { Variables: { HEALTH_URL: !Sub 'https://${Distribution.DomainName}/health' } }
+      Code:
+        ZipFile: |
+          import json, os, urllib.request
+          def handler(event, context):
+              req = urllib.request.Request(os.environ['HEALTH_URL'], headers={'User-Agent': 'goldenhour-health-probe'})
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  body = json.loads(r.read())
+              summary = {k: body.get(k) for k in ('success', 'store', 'store_healthy', 'directory_hospitals')}
+              if not body.get('success') or body.get('store') != 'mysql':
+                  raise Exception('unhealthy: ' + json.dumps(summary))
+              print(json.dumps(summary))
+              return summary
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  HealthProbeSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: goldenhour-health-probe
+      Description: Every 5 minutes. Disabled while the stack is stopped between demos.
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets: [{ Id: probe, Arn: !GetAtt HealthProbe.Arn }]
+
+  HealthProbePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref HealthProbe
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt HealthProbeSchedule.Arn
+
+  HealthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: goldenhour-health-failing
+      AlarmDescription: https://<cloudfront>/health failed twice in a row (10 minutes)
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref HealthProbe }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  DbCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: goldenhour-db-cpu-high
+      AlarmDescription: RDS CPU above 80% for 15 minutes
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions: [{ Name: DBInstanceIdentifier, Value: !Ref Database }]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  DbStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: goldenhour-db-storage-low
+      AlarmDescription: RDS free storage below 2 GiB
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions: [{ Name: DBInstanceIdentifier, Value: !Ref Database }]
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2147483648
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: goldenhour-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: !Ref MonthlyBudgetUsd, Unit: USD }
+      NotificationsWithSubscribers:
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref AlertEmail }]
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref AlertEmail }]
+        - Notification: { NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref AlertEmail }]
+
+  # ==========================================================================
+  # CI/CD: the role GitHub Actions assumes with OIDC - trusted only for this
+  # repository's Patch-2 branch. Not created while GitHubOidc=none.
+  # ==========================================================================
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Condition: WantDeployRole
+    Properties:
+      RoleName: goldenhour-github-deploy
+      Description: Assumed by GitHub Actions on pushes to Patch-2 (OIDC); deploys the backend and the front-ends
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com' }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+      Policies:
+        - PolicyName: goldenhour-deploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: Artifacts
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:ListBucket]
+                Resource: [!GetAtt ArtifactsBucket.Arn, !Sub '${ArtifactsBucket.Arn}/*']
+              - Sid: Site
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject, s3:ListBucket]
+                Resource: [!GetAtt SiteBucket.Arn, !Sub '${SiteBucket.Arn}/*']
+              - Sid: Invalidate
+                Effect: Allow
+                Action: [cloudfront:CreateInvalidation, cloudfront:GetInvalidation]
+                Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+              - Sid: Beanstalk
+                Effect: Allow
+                Action: [elasticbeanstalk:CreateApplicationVersion, elasticbeanstalk:UpdateEnvironment, elasticbeanstalk:Describe*]
+                Resource: '*'
+              - Sid: BeanstalkDeployInternals
+                Effect: Allow
+                Action:
+                  - cloudformation:GetTemplate
+                  - cloudformation:DescribeStack*
+                  - cloudformation:UpdateStack
+                  - cloudformation:CancelUpdateStack
+                  - autoscaling:Describe*
+                  - autoscaling:SuspendProcesses
+                  - autoscaling:ResumeProcesses
+                  - autoscaling:UpdateAutoScalingGroup
+                  - ec2:Describe*
+                  - logs:DescribeLogGroups
+                  - s3:CreateBucket
+                Resource: '*'
+              - Sid: BeanstalkBucket
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:ListBucket, s3:GetBucketLocation, s3:GetBucketPolicy, s3:PutBucketPolicy, s3:GetObjectAcl, s3:PutObjectAcl]
+                Resource: [!Sub 'arn:aws:s3:::elasticbeanstalk-${AWS::Region}-${AWS::AccountId}', !Sub 'arn:aws:s3:::elasticbeanstalk-${AWS::Region}-${AWS::AccountId}/*']
+      Tags: [{ Key: Project, Value: GoldenHour }]
+
+Outputs:
+  SiteUrl:
+    Value: !Sub 'https://${Distribution.DomainName}'
+  DistributionId:
+    Value: !Ref Distribution
+  SiteBucketName:
+    Value: !Ref SiteBucket
+  ArtifactsBucketName:
+    Value: !Ref ArtifactsBucket
+  BeanstalkApplication:
+    Value: !Ref Application
+  BeanstalkEnvironment:
+    Value: !Ref Environment
+  BeanstalkCname:
+    Value: !Sub goldenhour-${AWS::AccountId}.${AWS::Region}.elasticbeanstalk.com
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  DatabaseSecretArn:
+    Description: RDS-managed master secret (ARN only)
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
+  AppSecretArn:
+    Description: JWT_SECRET and first SUPER_ADMIN login (ARN only)
+    Value: !Ref AppSecret
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+  DeployRoleArn:
+    Condition: WantDeployRole
+    Value: !GetAtt DeployRole.Arn

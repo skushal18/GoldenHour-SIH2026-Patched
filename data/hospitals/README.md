@@ -96,3 +96,29 @@ python3 data/hospitals/build_india_directory.py \
 **Limits** — the source dates from 2017 with later metadata updates; hospitals
 open, close and move. PIN-code locations can be several kilometres out (the UI
 marks them ≈). Verify a hospital before giving it a login.
+
+---
+
+## The GoldenHour network (v7) — `network_hospitals.csv`
+
+The 100 hospitals the `hospitals` table in RDS starts with — what ambulances
+are matched against. `select_network_hospitals.py` picks them from
+`india_hospitals.csv` (deterministic; re-running gives the same file):
+
+- emergency-capable only (`emergency_likely = 1`), with a location; clinics,
+  eye/dental/maternity-only, diagnostic and AYUSH units skipped
+- preferred: coordinates as listed in the source, a phone number, the curated
+  Bengaluru list, larger institutions; duplicate listings of one hospital dropped
+- always included: St John's Medical College Hospital (12179), Bowring and Lady
+  Curzon (12815), Victoria Hospital (11880), Manipal Hospital Old Airport Road (100093)
+- Bengaluru 17, Mumbai 17, Chennai 17, Hyderabad 17, Kolkata 16, Pune 16.
+  **The national file has no Delhi rows**, so Delhi's share went to the other
+  six. Hyderabad includes rows the source still files under Andhra Pradesh.
+- Location grades: 60 listed, 38 pincode centre (≈), 2 district centre (≈);
+  87 have a phone number. Chennai and Kolkata have no listed coordinates in the
+  source, so all of theirs are pincode estimates.
+
+`npm --prefix backend run seed:hospitals` loads them (INSERT IGNORE: a second
+run changes nothing, and never undoes an administrator's change). The server
+does the same on boot when `HOSPITAL_SEED_ON_BOOT=true`. More hospitals are
+added from the admin console (Directory → *Add hospitals from the national list*).

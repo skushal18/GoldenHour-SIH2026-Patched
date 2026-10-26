@@ -25,7 +25,6 @@ process.env.DB_DRIVER = 'memory';
    (?hospital=<id>). Signed-in desks are covered by auth.test.js. */
 process.env.DESK_AUTH = 'ip';
 process.env.DEMO_SEED = 'false';
-process.env.ACCOUNT_SEED_FILE = '/nonexistent/no-seed.json';   // isolate from backend/seed
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const { io: ioClient } = require('socket.io-client');

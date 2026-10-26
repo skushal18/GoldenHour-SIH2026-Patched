@@ -38,6 +38,53 @@
       <div id="loginError" class="c-alert c-alert-error" role="alert" hidden></div>
       <button id="loginBtn" class="c-btn c-btn-primary" type="submit">Sign in</button>
       <p class="signin-foot">Forgot it? Ask your GoldenHour administrator to reset it. A signed-in ER screen stays signed in for 12 hours.</p>
+      <p class="signin-foot">New to GoldenHour? <a href="#activate" id="toActivate">Activate your hospital's login with its activation code</a>.</p>
+    </form>
+  </main>
+</div>
+
+<!-- ═══════════════════════ Activate (first time) ═══════════════════════ -->
+<div id="viewActivate" class="signin" hidden>
+  <aside class="signin-side">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>GoldenHour</div>
+    <div class="pitch">
+      <h1>Set up your hospital's ER desk.</h1>
+      <p>Your GoldenHour administrator gave your hospital a one-time activation code. Enter it, then choose the username and password your ER team will sign in with.</p>
+    </div>
+    <span class="credit" id="actHospitalSide">The code works once and expires after 7 days.</span>
+  </aside>
+  <main class="signin-main">
+    <form id="actCodeForm" class="signin-card" novalidate>
+      <div>
+        <h2>Enter your activation code</h2>
+        <p class="lede">16 letters and digits, like <span class="mono">7K3Q-PX9M-2DHT-W4RB</span>. Case and dashes do not matter.</p>
+      </div>
+      <label class="c-field">Activation code
+        <input id="actCode" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="24" required>
+      </label>
+      <div id="actCodeError" class="c-alert c-alert-error" role="alert" hidden></div>
+      <button id="actCodeBtn" class="c-btn c-btn-primary" type="submit">Continue</button>
+      <button class="c-btn-link" type="button" data-to-login>I already have a login — sign in</button>
+    </form>
+    <form id="actForm" class="signin-card" novalidate hidden>
+      <div>
+        <h2>Choose your sign-in</h2>
+        <p class="lede" id="actFor"></p>
+      </div>
+      <label class="c-field">Username
+        <input id="actUser" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="64" required>
+        <span class="c-hint">3–64 characters: letters, digits, dot, dash or underscore. Not case-sensitive.</span>
+      </label>
+      <label class="c-field">Password
+        <input id="actPass" type="password" autocomplete="new-password" minlength="10" required>
+        <span class="c-hint">At least 10 characters, and not containing the username. A short sentence is easiest to remember.</span>
+      </label>
+      <label class="c-field">Password again
+        <input id="actAgain" type="password" autocomplete="new-password" required>
+      </label>
+      <div id="actError" class="c-alert c-alert-error" role="alert" hidden></div>
+      <button id="actBtn" class="c-btn c-btn-primary" type="submit">Activate and open the ER desk</button>
+      <button id="actBack" class="c-btn-link" type="button">Use a different code</button>
     </form>
   </main>
 </div>
@@ -161,8 +208,19 @@
           <div class="title"><h1>Hospital accounts</h1><p>Each login opens one hospital's ER desk and nothing else.</p></div>
           <label class="c-field">Search<input id="accSearch" type="search" placeholder="Hospital, username, district"></label>
           <label class="c-field">State<select id="accState"><option value="">All states</option></select></label>
+          <label class="c-field">Status<select id="accStatus">
+            <option value="">Any status</option><option value="PENDING">Pending activation</option><option value="EXPIRED">Activation code expired</option>
+            <option value="ACTIVE">Active</option><option value="LOCKED">Locked</option><option value="DISABLED">Disabled</option>
+          </select></label>
         </div>
-        <div class="panel table-box" style="margin-top:16px">
+        <div class="panel panel-pad bulk-box">
+          <div class="bulk-text">
+            <h2>Create logins for all hospitals</h2>
+            <p class="sub">Every hospital in the GoldenHour directory without a login gets one, waiting for activation, with a one-time code valid for 7 days. You download the codes once, as a CSV; the server keeps only their hashes. Each hospital then chooses its own username and password.</p>
+          </div>
+          <button id="bulkBtn" type="button" class="c-btn c-btn-primary">Create logins for all hospitals</button>
+        </div>
+        <div class="panel table-box">
           <table class="table">
             <thead><tr><th>Hospital</th><th>Username</th><th>Status</th><th>Last sign-in</th><th><span class="sr-only">Actions</span></th></tr></thead>
             <tbody id="accRows"><tr><td colspan="5" class="table-empty">Loading…</td></tr></tbody>
@@ -173,14 +231,26 @@
       <!-- directory -->
       <section data-pane="directory" hidden>
         <div class="admin-head">
-          <div class="title"><h1>Hospital directory</h1><p>All-India list from the Government's National Hospital Directory.</p></div>
+          <div class="title"><h1>GoldenHour directory</h1><p>The hospitals ambulances are matched to, kept in the GoldenHour database. Switch one off and it is never offered a case.</p></div>
           <label class="c-field">Search<input id="dirSearch" type="search" placeholder="Name, district or pincode"></label>
           <label class="c-field">State<select id="dirState"><option value="">All states</option></select></label>
         </div>
         <div class="panel table-box" style="margin-top:16px">
           <table class="table">
+            <thead><tr><th>Hospital</th><th>Type</th><th>Location</th><th>Phone</th><th>Login</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="dirRows"><tr><td colspan="6" class="table-empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="admin-head" style="margin-top:28px">
+          <div class="title"><h2 class="h1-sub">Add hospitals from the national list</h2><p>29,844 hospitals from the Government's National Hospital Directory. Verify a hospital before adding it — locations marked ≈ are estimates.</p></div>
+          <label class="c-field">Search<input id="catSearch" type="search" placeholder="Name, district or pincode"></label>
+          <label class="c-field">State<select id="catState"><option value="">All states</option></select></label>
+        </div>
+        <div class="panel table-box" style="margin-top:16px">
+          <table class="table">
             <thead><tr><th>Hospital</th><th>Type</th><th>Location</th><th>Phone</th><th><span class="sr-only">Actions</span></th></tr></thead>
-            <tbody id="dirRows"><tr><td colspan="5" class="table-empty">Search to see hospitals.</td></tr></tbody>
+            <tbody id="catRows"><tr><td colspan="5" class="table-empty">Search by name, district or pincode, or pick a state.</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -214,27 +284,32 @@
       <form id="createForm" class="panel panel-pad" novalidate>
         <h2>Create a hospital login</h2>
         <div class="c-field picker">Hospital
-          <input id="createHospital" type="search" autocomplete="off" placeholder="Search the national directory" aria-describedby="createHospitalHint" aria-autocomplete="list" aria-controls="createPicker">
+          <input id="createHospital" type="search" autocomplete="off" placeholder="Search the GoldenHour directory" aria-describedby="createHospitalHint" aria-autocomplete="list" aria-controls="createPicker">
           <div id="createPicker" class="picker-list" role="listbox" hidden></div>
           <span id="createHospitalHint" class="c-hint">Pick a hospital from the list.</span>
         </div>
-        <label class="c-field">Username
+        <fieldset class="c-choice">
+          <legend>How the hospital signs in the first time</legend>
+          <label><input type="radio" name="createMode" value="activation" checked> Activation code — the hospital chooses its own username and password</label>
+          <label><input type="radio" name="createMode" value="password"> Temporary password — you choose the username</label>
+        </fieldset>
+        <label class="c-field" id="createUserField" hidden>Username
           <input id="createUser" type="text" autocapitalize="none" spellcheck="false" placeholder="Suggested when you pick a hospital">
-          <span class="c-hint">Lower-case letters, digits, dot, dash or underscore.</span>
+          <span class="c-hint">Letters, digits, dot, dash or underscore.</span>
         </label>
         <div id="createError" class="c-alert c-alert-error" role="alert" hidden></div>
         <div id="createResult" hidden>
           <div class="c-alert c-alert-ok" role="status" id="createResultText"></div>
-          <div class="c-field" style="margin-top:10px">Temporary password
+          <div class="c-field" style="margin-top:10px"><span id="createSecretLabel">Temporary password</span>
             <div class="secret"><code id="createSecret"></code><button type="button" class="c-btn-link" id="copySecret">Copy</button></div>
-            <span class="c-hint">Shown once. Give it to the hospital privately; they must change it at first sign-in.</span>
+            <span class="c-hint" id="createSecretHint">Shown once. Give it to the hospital privately; they must change it at first sign-in.</span>
           </div>
         </div>
         <button id="createBtn" class="c-btn c-btn-primary" type="submit">Create login</button>
       </form>
 
       <section class="panel panel-pad" aria-labelledby="hCoverage">
-        <h2 id="hCoverage">Directory coverage</h2>
+        <h2 id="hCoverage">Coverage</h2>
         <div id="coverage"><div class="kv"><span>Loading…</span></div></div>
       </section>
     </aside>

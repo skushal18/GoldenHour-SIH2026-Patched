@@ -1,0 +1,101 @@
+id,city,name,coord_source,phone
+12179,Bengaluru,St John's Medical College Hospital,listed,080-22065000
+12815,Bengaluru,Bowring and Lady Curzon Hospital,listed,080-25580262
+11880,Bengaluru,Victoria Hospital,pincode,080-26701150
+100093,Bengaluru,"Manipal Hospital, Old Airport Road",district,1800-102-4647
+12812,Bengaluru,Sri Jayadeva Institute of Cardiovascular Sciences and Research,listed,080 22977202
+12726,Bengaluru,People Tree Hospitals,listed,080-26999955
+12732,Bengaluru,Pristine Hospital,listed,"080 41354444, 08971765544"
+11853,Bengaluru,St Martha's Hospital,listed,080-25594520
+12687,Bengaluru,Jayashree Multispeciality Hospital,listed,"080 25745777, 080 25745888"
+100068,Bengaluru,"Apollo Hospitals, Jayanagar",pincode,080-46124444
+100002,Bengaluru,Bangalore Medical College and Research Institute (BMCRI),pincode,080-26701529
+100022,Bengaluru,Beguru Government Hospital,pincode,074883 12569
+12808,Bengaluru,BGS Global Hospitals,listed,080 24242424
+12660,Bengaluru,Chinmaya Narayana Super Specialty Centre,listed,9900591266
+100011,Bengaluru,Indira Gandhi Institute of Child Health (IGICH),pincode,080-22233885
+11889,Bengaluru,K C General Hospital,listed,
+12118,Bengaluru,Kidwai Memorial Institute Of Oncology,listed,
+17701,Mumbai,Jaslok Hospital,listed,022 66573333
+17703,Mumbai,Fortis Hospital Mulund,listed,022 41114111
+17700,Mumbai,Fortis Hiranandani Hospital,listed,022 41114111
+17738,Mumbai,Nanavati Hospital,listed,022 26267500
+17697,Mumbai,Holy Spirit Hospital,listed,"022 28248501, 022 28248502, 02"
+17727,Mumbai,Kkasturi Medicare Pvt Ltd,listed,"022 28147676, 022 64547676"
+17637,Mumbai,"Breach Candy Hospital, Mumbai",listed,022 23667890
+17719,Mumbai,Hinduja Healthcare Surgical,listed,"022 61746098, 022 61746099"
+17653,Mumbai,Kokilaben Dhirubhai Ambani Hospital and Medical Research Institute,listed,022 30919191
+17732,Mumbai,Life Care Hospital,listed,8080221110
+17640,Mumbai,Lilavati Hospital and Research Center,listed,"022 26568063, 022 26568064"
+17695,Mumbai,P D Hinduja National Hospital and Research Centre,listed,"022 24449199, 022 24452222"
+17745,Mumbai,Platinum Hospitals,listed,9987229960
+17749,Mumbai,Rane Heart Hospital,listed,9819706667
+17755,Mumbai,Sai Seva Hospital And Icu,listed,022 27799529
+17696,Mumbai,Godrej Memorial Hospital,listed,022 25740919
+17728,Mumbai,Kohinoor Hospitals Pvt Ltd,pincode,022 67556766
+24191,Chennai,"Aditya Hospital, Kilpauk",pincode,044 26411447
+24179,Chennai,"Apollo Hospitals, Greams Lane",pincode,18605001066
+24187,Chennai,"Apollo Hospitals, Tondiarpet",pincode,"1066, 044 28290792"
+24176,Chennai,Fortis Malar Hospital,pincode,044 24914737
+24251,Chennai,Global Hospitals and Health City,pincode,080 24242424
+24257,Chennai,Hindu Mission Health Services,pincode,"044 22243709, 044 22243026, 04"
+24258,Chennai,Hindu Mission Hospital,pincode,8754595006
+24184,Chennai,Madras Medical Mission Hospital - Institute of Cardio Vascular Diseases,pincode,105911
+24177,Chennai,MIOT Hospitals,pincode,044 22499800
+24183,Chennai,Sri Ramachandra Medical Centre (SRMC),pincode,044 24768402
+24231,Chennai,Chettinad Super Speciality Hospital,district,105757
+24208,Chennai,A.N.N.Hospital,pincode,"044 24869301, 07299906307"
+24185,Chennai,Aakash Hospital,pincode,"044 49304200, 044 49304299"
+24228,Chennai,B.M.Hospital,pincode,"0860800 1182, 044 22672182, 04"
+24242,Chennai,Deepam Hospital (P) Ltd.,pincode,082202 82202
+24245,Chennai,Diabetes Research Centre and M.V.Hospital For Diabetes,pincode,1800 425 0005
+24250,Chennai,Girishwari Hospital Pvt Ltd,pincode,044 4760 0600
+627,Hyderabad,Apollo DRDO Hospital,listed,040 24342222
+630,Hyderabad,Apollo Emergency Centre,listed,040 24557552
+628,Hyderabad,Apollo Hospital,listed,040 27718888
+564,Hyderabad,Apollo Hospitals,listed,040 23607777
+571,Hyderabad,Asian Institute of Gastroenterology,listed,040 23378888
+578,Hyderabad,Basavatarakam Indo American Cancer Institute And Research Centre,listed,"040 23551235, 040 23552131"
+6,Hyderabad,"Care Hospital, Banjara",listed,040 30418888
+581,Hyderabad,"Care Hospital, Nampally",listed,040 30417777
+722,Hyderabad,Gandhi Medical College and Hospital,listed,040 27505566
+638,Hyderabad,Guru Nanak Care Hospital,listed,"040 30219000, 040 30219111, 04"
+566,Hyderabad,"KIMS Hospital, Secunderabad",listed,9849990401
+575,Hyderabad,Nizams Institute of Medical Sciences (NIMS),listed,"040 23390933, 040 23399690, 04"
+689,Hyderabad,Raghava Multi Speciality Hospital,listed,"040 23732617, 040 23732453, 04"
+576,Hyderabad,Sathya Kidney Centre and Super Speciality Hospital,listed,040 27636444
+584,Hyderabad,Sunshine Heart Institute,listed,8008102102
+702,Hyderabad,Surakshaka Multi Speciality Hospital,listed,9652533255
+720,Hyderabad,Vijaya Health Care,listed,"040 67362929, 040 66262927"
+31634,Kolkata,All Asia Medical Institute,pincode,033 66037324
+31635,Kolkata,"AMRI Hospitals, Saltlake Annexe",pincode,033 6450000
+31590,Kolkata,Apex Institute Of Medical Science,pincode,033 24164555
+31616,Kolkata,Apollo Gleneagles Hospitals,pincode,"033 23203040, 033 23202122"
+31430,Kolkata,B.K.Dutt Memorial Medical Centre,pincode,24611512
+31549,Kolkata,Bp Poddar Hospital And Medical Research Ltd,pincode,"033 24458901, 24458902, 244589"
+31372,Kolkata,C I T Medical Centre,pincode,23531289
+31629,Kolkata,Columbia Asian Hospital,pincode,033 39898969
+31623,Kolkata,Desun Hospital And Heart Research Institute,pincode,9007077755
+31632,Kolkata,Fortis Hospital and Kidney Institute,pincode,105711
+31621,Kolkata,Fortis Hospitals,pincode,033 66284444
+31631,Kolkata,GD Hospital and Diabetes Institute,pincode,"033 22255030, 033 22255031, 03"
+31484,Kolkata,Kothari Medical Centre,pincode,"033 24567050, 24567059"
+31518,Kolkata,Kpc Medical College And Hospital,pincode,"033 30016100, 30016136"
+31458,Kolkata,Labbaik Medical Centre Pvt Ltd,pincode,"033 24480645, 24491966, 309661"
+31536,Kolkata,Lions North Kolkata Hospital and Medical Centre,pincode,24710076
+18950,Pune,CIMETs Inamdar Multispeciality Hospital,listed,"020 66812333, 020 66812255"
+18973,Pune,Sancheti Institute For Orthopaedics and Rehabilitation,listed,020 28999960
+18947,Pune,Aditya Birla Memorial Hospital,listed,"020 30717777, 020 40707777"
+18953,Pune,Inlaks Budhrani Hospital,listed,020 66099719
+18963,Pune,Sai Shree Hospital,listed,020 41088600
+18714,Pune,Anand Medical Foundation Subudh Hospital,listed,
+18663,Pune,Ashwin Medical Foundations Moraya Hospital,listed,
+18962,Pune,B.J.Medical College and Sassoon Hospital,listed,
+18646,Pune,City Medical Centre,listed,
+18948,Pune,"Columbia Asia Hospital, Pune",listed,
+18957,Pune,Deenanath mangeshkar Hospital,listed,
+18698,Pune,Desai Accident and General Hospital,listed,
+18351,Pune,Dr Dole General Hospital,listed,
+18532,Pune,Gandhi Accident and General Hospital,listed,
+18652,Pune,Global Hospital and Research Institute,listed,
+18951,Pune,Jehangir Hospital,listed,

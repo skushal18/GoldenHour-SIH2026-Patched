@@ -47,6 +47,14 @@
     }).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (body) {
         if (timer) clearTimeout(timer);
+        /* 502–504: the server is down or asleep (on AWS it sleeps after two
+           idle hours). Ask it to start and treat it like a lost connection,
+           so a signed-in desk keeps its session and retries. */
+        if (res.status >= 502 && res.status <= 504) {
+          wake();
+          var down = new Error(WAKING); down.network = true; down.status = res.status;
+          throw down;
+        }
         if (res.status === 401 && !opts.anonymous) {
           saveSession(null);
           if (onSignedOut) onSignedOut(body && body.message);
@@ -60,10 +68,20 @@
       });
     }, function (err) {
       if (timer) clearTimeout(timer);
+      if (err && err.network) throw err;
+      wake();
       var e = new Error(err && err.name === 'AbortError' ? 'The server did not answer in time.' : 'Could not reach the server.');
       e.network = true;
       throw e;
     });
+  }
+
+  var WAKING = 'GoldenHour is starting up after being idle. This takes a few minutes — it will reconnect by itself.';
+  var lastWake = 0;
+  function wake() {
+    if (Date.now() - lastWake < 60000) return;
+    lastWake = Date.now();
+    fetch(location.origin + '/wake', { mode: 'no-cors', cache: 'no-store' }).catch(function () {});
   }
 
   /* ── formatting ──────────────────────────────────────────────────────── */

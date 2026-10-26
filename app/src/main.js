@@ -108,8 +108,21 @@ function boot(win, doc) {
       })
     : createLiveTransport(env.apiRoot || '', (url, opts) => {
         if (typeof win.fetch !== 'function') return Promise.reject(new NetworkError('No fetch in this runtime'));
-        return win.fetch(url, opts);
+        return win.fetch(url, opts).then(res => {
+          if (res.status >= 502 && res.status <= 504) wakeServer();
+          return res;
+        }, err => { wakeServer(); throw err; });
       });
+
+  /* On AWS the server sleeps after two idle hours. A gateway error or no
+     answer at all asks it to start (at most once a minute); the outbox keeps
+     any case until the server is back, a few minutes later, and sends it. */
+  let lastWake = 0;
+  function wakeServer() {
+    if (!env.serverRoot || typeof win.fetch !== 'function' || Date.now() - lastWake < 60000) return;
+    lastWake = Date.now();
+    win.fetch(env.serverRoot + '/wake', { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+  }
 
   const outbox = createOutbox(storage, {
     onRejected: entry => toast('A queued case was refused by the server and discarded'),
