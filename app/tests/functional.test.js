@@ -88,7 +88,13 @@ async function main() {
     assert.strictEqual(/select\s+(a\s+)?(destination\s+)?hospital/i.test(d.body.textContent), false);
   });
   check("no hospital input or checkbox exists", function () {
-    assert.strictEqual(d.querySelectorAll("[id*='hospital' i], [name*='hospital' i]").length, 0);
+    /* Form controls only: the glass design has a hospital *icon* (#i-hospital),
+       which is a picture, not a way for the crew to pick a hospital. */
+    var fields = "input, select, textarea, button, [role='checkbox'], [role='radio'], [role='option']";
+    var hits = Array.prototype.filter.call(d.querySelectorAll(fields), function (el) {
+      return /hospital/i.test((el.id || '') + ' ' + (el.getAttribute('name') || ''));
+    });
+    assert.strictEqual(hits.length, 0, hits.map(function (el) { return el.id || el.getAttribute('name'); }).join(', '));
   });
   check("a broadcast radius control replaces it", function () {
     assert.ok($("radiusKm"));
@@ -528,7 +534,11 @@ async function main() {
     assert.ok(css.indexOf("env(safe-area-inset-bottom") !== -1);
   });
   check("there is a no-backdrop-filter fallback for old WebViews", function () {
-    assert.ok(css.indexOf("@supports not") !== -1);
+    /* Either an explicit "@supports not" fallback, or (the glass design) blur
+       applied only inside "@supports (backdrop-filter…)" over solid defaults. */
+    var gated = /@supports\s*\(\s*backdrop-filter/.test(css);
+    var ungated = css.replace(/@supports[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '').match(/(^|[;{\s])backdrop-filter\s*:\s*blur/g);
+    assert.ok(css.indexOf("@supports not") !== -1 || (gated && !ungated), 'blur must be gated behind @supports');
   });
   check("reduced-motion users get a still interface", function () {
     assert.ok(css.indexOf("prefers-reduced-motion") !== -1);
