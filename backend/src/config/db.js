@@ -48,6 +48,15 @@ function connectionSettings(env) {
   };
 }
 
+/* DB_SSL=rds: TLS verified against the Amazon RDS certificate authorities
+   that ship with mysql2. DB_SSL=true: TLS against the system CAs. */
+function sslOption(raw) {
+  const v = String(raw || '').toLowerCase();
+  if (v === 'rds') return 'Amazon RDS';
+  if (v === 'true') return { rejectUnauthorized: true };
+  return undefined;
+}
+
 const settings = connectionSettings();
 const pool = mysql.createPool({
   host: settings.host,
@@ -57,10 +66,13 @@ const pool = mysql.createPool({
   database: settings.database,
   waitForConnections: true,
   connectionLimit: Number(process.env.DB_POOL_SIZE) || 10,
-  ssl: String(process.env.DB_SSL || '').toLowerCase() === 'true' ? { rejectUnauthorized: true } : undefined,
+  ssl: sslOption(process.env.DB_SSL),
   dateStrings: false,
 });
 pool.settings = { host: settings.host, port: settings.port, database: settings.database, source: settings.source };
+/* New connections copy this config, so a rotated password applies to every
+   connection opened from now on (config/awsSecrets.js watchDbSecret). */
+pool.setPassword = pw => { pool.pool.config.connectionConfig.password = pw; };
 
 module.exports = pool;
 module.exports.connectionSettings = connectionSettings;

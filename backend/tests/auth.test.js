@@ -23,7 +23,6 @@ process.env.PORT = process.env.TEST_PORT_AUTH || '5121';
 process.env.DB_DRIVER = 'memory';
 process.env.DESK_AUTH = 'jwt';
 process.env.DEMO_SEED = 'false';
-process.env.ACCOUNT_SEED_FILE = '/nonexistent/no-seed.json';   // isolate from backend/seed
 process.env.SUPER_ADMIN_USERNAME = 'root.admin';
 process.env.SUPER_ADMIN_PASSWORD = 'correct horse battery staple';
 process.env.BCRYPT_ROUNDS = '4';

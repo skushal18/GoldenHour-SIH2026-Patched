@@ -15,21 +15,50 @@
 const TABLES = {
   accounts: `CREATE TABLE IF NOT EXISTS accounts (
     account_id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(64) NOT NULL,
-    password_hash VARCHAR(100) NOT NULL,
+    username VARCHAR(64) NULL,
+    password_hash VARCHAR(100) NULL,
     role ENUM('SUPER_ADMIN','HOSPITAL_STAFF') NOT NULL,
     hospital_id INT NULL,
-    status ENUM('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
+    status ENUM('PENDING','ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
     must_change_password TINYINT(1) NOT NULL DEFAULT 1,
     failed_attempts INT NOT NULL DEFAULT 0,
     locked_until DATETIME NULL,
     token_version INT NOT NULL DEFAULT 0,
     last_login_at DATETIME NULL,
+    activation_code_hash CHAR(64) NULL,
+    activation_expires_at DATETIME NULL,
+    activated_at DATETIME NULL,
     created_by VARCHAR(64) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_account_username (username),
+    UNIQUE KEY uniq_account_activation (activation_code_hash),
     INDEX idx_account_hospital (hospital_id)
+  )`,
+  /* The GoldenHour network: the hospitals ambulances are matched to. id is the
+     directory id from data/hospitals/india_hospitals.csv. */
+  hospitals: `CREATE TABLE IF NOT EXISTS hospitals (
+    id INT PRIMARY KEY,
+    source_id VARCHAR(40) NULL,
+    name VARCHAR(255) NOT NULL,
+    state VARCHAR(80) NOT NULL DEFAULT '',
+    district VARCHAR(120) NOT NULL DEFAULT '',
+    pincode VARCHAR(10) NULL,
+    address VARCHAR(500) NULL,
+    phone VARCHAR(120) NULL,
+    ownership VARCHAR(60) NULL,
+    care_type VARCHAR(80) NULL,
+    specialties VARCHAR(255) NULL,
+    beds INT NULL,
+    emergency_likely TINYINT(1) NOT NULL DEFAULT 1,
+    lat DECIMAL(10,7) NULL,
+    lng DECIMAL(10,7) NULL,
+    coord_source VARCHAR(10) NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_hospital_state (state),
+    INDEX idx_hospital_active (active)
   )`,
   broadcasts: `CREATE TABLE IF NOT EXISTS broadcasts (
     case_code VARCHAR(20) PRIMARY KEY,
@@ -79,6 +108,23 @@ const TABLES = {
 /* Columns added after a table first shipped. [table, column, definition] */
 const ADDED_COLUMNS = [
   ['broadcast_targets', 'hospital_contact', 'VARCHAR(40) NULL'],
+  ['accounts', 'activation_code_hash', 'CHAR(64) NULL'],
+  ['accounts', 'activation_expires_at', 'DATETIME NULL'],
+  ['accounts', 'activated_at', 'DATETIME NULL'],
+];
+
+/* Columns whose definition changed after they first shipped, widened in place
+   (never narrowed, never dropped). [table, column, definition, isCurrent(col)]
+   v7: a hospital login can wait for activation — no username or password yet. */
+const CHANGED_COLUMNS = [
+  ['accounts', 'username', 'VARCHAR(64) NULL', c => c.IS_NULLABLE === 'YES'],
+  ['accounts', 'password_hash', 'VARCHAR(100) NULL', c => c.IS_NULLABLE === 'YES'],
+  ['accounts', 'status', "ENUM('PENDING','ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE'", c => /'PENDING'/.test(c.COLUMN_TYPE)],
+];
+
+/* Indexes added after a table first shipped. [table, index, definition] */
+const ADDED_INDEXES = [
+  ['accounts', 'uniq_account_activation', 'UNIQUE KEY uniq_account_activation (activation_code_hash)'],
 ];
 
 async function ensureSchema(pool, log) {
@@ -91,6 +137,24 @@ async function ensureSchema(pool, log) {
     if (!Number(rows[0].n)) {
       await pool.query('ALTER TABLE `' + table + '` ADD COLUMN `' + column + '` ' + def);
       logger.log('🗃️  added column ' + table + '.' + column);
+    }
+  }
+  for (const [table, column, def, isCurrent] of CHANGED_COLUMNS) {
+    const [rows] = await pool.query(
+      'SELECT IS_NULLABLE, COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+      [table, column]);
+    if (rows.length && !isCurrent(rows[0])) {
+      await pool.query('ALTER TABLE `' + table + '` MODIFY COLUMN `' + column + '` ' + def);
+      logger.log('🗃️  changed column ' + table + '.' + column);
+    }
+  }
+  for (const [table, name, def] of ADDED_INDEXES) {
+    const [rows] = await pool.query(
+      'SELECT COUNT(*) AS n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?',
+      [table, name]);
+    if (!Number(rows[0].n)) {
+      await pool.query('ALTER TABLE `' + table + '` ADD ' + def);
+      logger.log('🗃️  added index ' + table + '.' + name);
     }
   }
 }

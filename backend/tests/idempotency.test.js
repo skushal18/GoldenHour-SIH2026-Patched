@@ -14,7 +14,6 @@ process.env.PORT = process.env.TEST_PORT_IDEM || '5098';
 process.env.DB_DRIVER = 'memory';
 process.env.DESK_AUTH = 'ip';
 process.env.DEMO_SEED = 'false';
-process.env.ACCOUNT_SEED_FILE = '/nonexistent/no-seed.json';   // isolate from backend/seed
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const { server } = require('../src/server');

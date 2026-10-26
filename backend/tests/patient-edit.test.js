@@ -16,7 +16,6 @@ process.env.PORT = process.env.TEST_PORT_PE || '5101';
 process.env.DB_DRIVER = 'memory';
 process.env.DESK_AUTH = 'ip';          // LAN rehearsal identity; auth.test.js covers sign-in
 process.env.DEMO_SEED = 'false';
-process.env.ACCOUNT_SEED_FILE = '/nonexistent/no-seed.json';   // isolate from backend/seed
 if (process.argv.indexOf('--memory') === -1) process.argv.push('--memory');
 
 const { io: ioClient } = require('socket.io-client');

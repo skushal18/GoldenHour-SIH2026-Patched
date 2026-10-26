@@ -15,6 +15,10 @@
      account, resetting its password or signing out everywhere bumps the
      version, which voids every token issued before — so a disabled hospital
      is locked out on its very next request, not when its token expires.
+   * Activation: the administrator creates a hospital's login as PENDING with
+     a random one-time code (shown once, stored as a SHA-256, valid for 7
+     days). The hospital enters the code, then chooses its own username and
+     password; the code is then spent.
    ========================================================================== */
 'use strict';
 
@@ -31,7 +35,12 @@ const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
 const TOKEN_TTL = process.env.JWT_TTL || '12h';
 const ROLES = ['SUPER_ADMIN', 'HOSPITAL_STAFF'];
-const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{2,63}$/;
+const USERNAME_RE = /^[a-z0-9._-]{3,64}$/;
+const USERNAME_RULE = 'Usernames are 3–64 characters: letters, digits, dot, dash or underscore.';
+const ACTIVATION_DAYS = Number(process.env.ACTIVATION_DAYS) || 7;
+/* Crockford base32 (no I, L, O or U), so a code read over the phone survives:
+   typed O is read as 0 and I or L as 1. 16 symbols = 80 random bits. */
+const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 /* A real bcrypt hash of a random string, compared against when the user does
    not exist so both paths take the same time. */
 const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 4);
@@ -70,6 +79,11 @@ function passwordProblem(pw, username) {
 
 function normaliseUsername(u) { return String(u || '').trim().toLowerCase(); }
 
+function activeHospital(id) {
+  const h = id == null ? null : directory.get(id);
+  return h && h.active !== false ? h : null;
+}
+
 function hospitalFor(account) {
   if (!account || account.hospital_id == null) return null;
   const h = directory.get(account.hospital_id);
@@ -98,7 +112,8 @@ async function login(username, password) {
   if (!name || !password) return { ok: false, status: 400, reason: 'MISSING', message: 'Enter your username and password.' };
 
   const account = await accounts.findByUsername(name);
-  const ok = await bcrypt.compare(String(password), account ? account.password_hash : DUMMY_HASH);
+  const ok = await bcrypt.compare(String(password), account && account.password_hash ? account.password_hash : DUMMY_HASH)
+    && !!(account && account.password_hash);
   const now = Date.now();
 
   if (account && account.locked_until && new Date(account.locked_until).getTime() > now) {
@@ -124,8 +139,8 @@ async function login(username, password) {
   if (account.status !== 'ACTIVE') {
     return { ok: false, status: 403, reason: 'DISABLED', message: 'This login has been disabled. Contact your GoldenHour administrator.' };
   }
-  if (account.role === 'HOSPITAL_STAFF' && !directory.get(account.hospital_id)) {
-    return { ok: false, status: 403, reason: 'NO_HOSPITAL', message: 'This login is not linked to a hospital in the directory.' };
+  if (account.role === 'HOSPITAL_STAFF' && !activeHospital(account.hospital_id)) {
+    return { ok: false, status: 403, reason: 'NO_HOSPITAL', message: 'This login is not linked to a hospital on GoldenHour.' };
   }
   const updated = await accounts.update(account.account_id, { failed_attempts: 0, locked_until: null, last_login_at: new Date().toISOString() });
   return { ok: true, session: sessionBody(updated, issueToken(updated)) };
@@ -159,7 +174,7 @@ function bearer(req) {
 async function changePassword(account, current, next) {
   const accounts = getAccounts();
   const fresh = await accounts.findById(account.account_id);
-  if (!fresh || !(await bcrypt.compare(String(current || ''), fresh.password_hash))) {
+  if (!fresh || !fresh.password_hash || !(await bcrypt.compare(String(current || ''), fresh.password_hash))) {
     return { ok: false, status: 400, reason: 'WRONG_CURRENT', message: 'Your current password is not right.' };
   }
   const problem = passwordProblem(next, fresh.username);
@@ -183,10 +198,10 @@ async function signOutEverywhere(account) {
 
 async function createHospitalAccount({ hospital_id, username }, actor) {
   const accounts = getAccounts();
-  const h = directory.get(hospital_id);
-  if (!h) return { ok: false, status: 400, reason: 'NO_HOSPITAL', message: 'Pick a hospital from the directory.' };
+  const h = activeHospital(hospital_id);
+  if (!h) return { ok: false, status: 400, reason: 'NO_HOSPITAL', message: 'Pick a hospital from the GoldenHour directory.' };
   const name = normaliseUsername(username) || suggestUsername(h);
-  if (!USERNAME_RE.test(name)) return { ok: false, status: 400, reason: 'BAD_USERNAME', message: 'Usernames are 3–64 characters: lower-case letters, digits, dot, dash or underscore.' };
+  if (!USERNAME_RE.test(name)) return { ok: false, status: 400, reason: 'BAD_USERNAME', message: USERNAME_RULE };
   const temp = generatePassword();
   try {
     const account = await accounts.create({ username: name, password_hash: await hashPassword(temp), role: 'HOSPITAL_STAFF',
@@ -212,8 +227,12 @@ async function resetPassword(accountId, actor) {
   if (a.role === 'SUPER_ADMIN' && actor && a.account_id === actor.account_id) {
     return { ok: false, status: 400, reason: 'SELF', message: 'Change your own password from your account menu.' };
   }
+  if (!a.username) {
+    return { ok: false, status: 409, reason: 'PENDING', message: 'This login has not been activated yet. Re-issue its activation code instead.' };
+  }
   const temp = generatePassword();
   const updated = await accounts.update(a.account_id, { password_hash: await hashPassword(temp), must_change_password: true,
+    status: a.status === 'PENDING' ? 'ACTIVE' : a.status, activation_code_hash: null, activation_expires_at: null,
     failed_attempts: 0, locked_until: null, token_version: (a.token_version || 0) + 1 });
   return { ok: true, account: publicView(updated), temporary_password: temp };
 }
@@ -223,6 +242,9 @@ async function setStatus(accountId, status, actor) {
   const a = await accounts.findById(accountId);
   if (!a) return { ok: false, status: 404, reason: 'NOT_FOUND', message: 'No such account.' };
   if (actor && a.account_id === actor.account_id) return { ok: false, status: 400, reason: 'SELF', message: 'You cannot disable your own login.' };
+  if (status === 'ACTIVE' && !a.password_hash) {
+    return { ok: false, status: 409, reason: 'PENDING', message: 'This login has not been activated yet. Re-issue its activation code instead.' };
+  }
   if (status === 'DISABLED' && a.role === 'SUPER_ADMIN' && (await accounts.countByRole('SUPER_ADMIN')) <= 1) {
     return { ok: false, status: 400, reason: 'LAST_ADMIN', message: 'This is the only administrator.' };
   }
@@ -231,16 +253,154 @@ async function setStatus(accountId, status, actor) {
   return { ok: true, account: publicView(updated) };
 }
 
-async function listAccounts({ q, state } = {}) {
+/**
+ * What the administrator sees for a login:
+ * PENDING (waiting for activation) · EXPIRED (activation code ran out) ·
+ * LOCKED (too many wrong passwords) · DISABLED · ACTIVE.
+ */
+function accountState(a, now) {
+  const t = now || Date.now();
+  if (a.status === 'PENDING') {
+    return a.activation_expires_at && new Date(a.activation_expires_at).getTime() <= t ? 'EXPIRED' : 'PENDING';
+  }
+  if (a.status === 'DISABLED') return 'DISABLED';
+  if (a.locked_until && new Date(a.locked_until).getTime() > t) return 'LOCKED';
+  return 'ACTIVE';
+}
+
+async function listAccounts({ q, state, status } = {}) {
   const all = await getAccounts().list();
   const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
   const st = state ? String(state).toLowerCase() : null;
-  return all.map(a => Object.assign(publicView(a), { hospital: hospitalFor(a) })).filter(a => {
+  const want = status ? String(status).toUpperCase() : null;
+  return all.map(a => Object.assign(publicView(a), { state: accountState(a), hospital: hospitalFor(a) })).filter(a => {
     if (st && !(a.hospital && String(a.hospital.state || '').toLowerCase() === st)) return false;
+    if (want && a.state !== want) return false;
     if (!terms.length) return true;
-    const hay = (a.username + ' ' + (a.hospital ? a.hospital.name + ' ' + a.hospital.district + ' ' + a.hospital.state : '') + ' ' + a.role).toLowerCase();
+    const hay = ((a.username || '') + ' ' + (a.hospital ? a.hospital.name + ' ' + a.hospital.district + ' ' + a.hospital.state : '') + ' ' + a.role).toLowerCase();
     return terms.every(t => hay.indexOf(t) !== -1);
   });
+}
+
+/* ── Activation codes ────────────────────────────────────────────────────── */
+
+function generateActivationCode() {
+  const bytes = crypto.randomBytes(16);
+  let s = '';
+  for (let i = 0; i < 16; i++) s += CODE_ALPHABET[bytes[i] % 32];
+  return s.match(/.{4}/g).join('-');
+}
+
+/** Case, spaces and dashes do not matter when the code is typed in. */
+function normaliseCode(code) {
+  return String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1');
+}
+function hashCode(code) { return crypto.createHash('sha256').update(normaliseCode(code)).digest('hex'); }
+
+function activationExpiry() { return new Date(Date.now() + ACTIVATION_DAYS * 86_400_000).toISOString(); }
+
+function issued(account, code) {
+  const h = hospitalFor(account);
+  return { account: publicView(account), hospital: h, activation_code: code, expires_at: account.activation_expires_at };
+}
+
+/** One PENDING login for a hospital, with a fresh activation code (returned once). */
+async function createPendingAccount({ hospital_id }, actor) {
+  const h = activeHospital(hospital_id);
+  if (!h) return { ok: false, status: 400, reason: 'NO_HOSPITAL', message: 'Pick a hospital from the GoldenHour directory.' };
+  const code = generateActivationCode();
+  const account = await getAccounts().create({ username: null, password_hash: null, role: 'HOSPITAL_STAFF', hospital_id: h.hospital_id,
+    status: 'PENDING', must_change_password: false, activation_code_hash: hashCode(code), activation_expires_at: activationExpiry(),
+    created_by: actor ? actor.username : null });
+  return Object.assign({ ok: true }, issued(account, code));
+}
+
+/**
+ * A PENDING login with an activation code for every active network hospital
+ * that has no hospital login yet. Hospitals that already have one (in any
+ * state but retired) are skipped; re-issue a code for those one at a time.
+ */
+async function createPendingForAll(actor) {
+  const accounts = getAccounts();
+  /* A login retired from the old seed file does not count: that hospital still needs one. */
+  const have = new Set((await accounts.list()).filter(a => a.role === 'HOSPITAL_STAFF' && a.created_by !== 'seed-file').map(a => a.hospital_id));
+  const created = [];
+  let skipped = 0;
+  for (const h of directory.list()) {
+    if (h.active === false) continue;
+    if (have.has(h.hospital_id)) { skipped++; continue; }
+    const r = await createPendingAccount({ hospital_id: h.hospital_id }, actor);
+    if (r.ok) { created.push(r); have.add(h.hospital_id); }
+  }
+  return { ok: true, created, skipped };
+}
+
+/**
+ * A new activation code for a hospital login. The login goes back to PENDING:
+ * its password stops working and every session ends; the hospital chooses a
+ * username and password again when it activates. Any earlier code is void.
+ */
+async function reissueActivation(accountId) {
+  const accounts = getAccounts();
+  const a = await accounts.findById(accountId);
+  if (!a) return { ok: false, status: 404, reason: 'NOT_FOUND', message: 'No such account.' };
+  if (a.role !== 'HOSPITAL_STAFF') return { ok: false, status: 400, reason: 'NOT_HOSPITAL', message: 'Only hospital logins are activated with a code.' };
+  if (!activeHospital(a.hospital_id)) return { ok: false, status: 400, reason: 'NO_HOSPITAL', message: 'This hospital is switched off in the directory.' };
+  const code = generateActivationCode();
+  const updated = await accounts.update(a.account_id, { status: 'PENDING', password_hash: null, must_change_password: false,
+    activation_code_hash: hashCode(code), activation_expires_at: activationExpiry(), failed_attempts: 0, locked_until: null,
+    token_version: (a.token_version || 0) + 1 });
+  return Object.assign({ ok: true }, issued(updated, code));
+}
+
+async function pendingFor(code) {
+  const norm = normaliseCode(code);
+  if (norm.length !== 16) return { ok: false, status: 400, reason: 'INVALID_CODE', message: 'That activation code is not right. Check it and try again.' };
+  const a = await getAccounts().findByActivationHash(hashCode(norm));
+  if (!a || a.status !== 'PENDING') return { ok: false, status: 400, reason: 'INVALID_CODE', message: 'That activation code is not right, or it has already been used.' };
+  if (!a.activation_expires_at || new Date(a.activation_expires_at).getTime() <= Date.now()) {
+    return { ok: false, status: 410, reason: 'CODE_EXPIRED', message: 'That activation code has expired. Ask your GoldenHour administrator for a new one.' };
+  }
+  const h = activeHospital(a.hospital_id);
+  if (!h) return { ok: false, status: 403, reason: 'NO_HOSPITAL', message: 'This hospital is not on GoldenHour any more.' };
+  return { ok: true, account: a, hash: hashCode(norm) };
+}
+
+/** Which hospital a code is for, so the screen can say so before anything is chosen. */
+async function lookupActivation(code) {
+  const r = await pendingFor(code);
+  if (!r.ok) return r;
+  return { ok: true, hospital: hospitalFor(r.account), expires_at: r.account.activation_expires_at };
+}
+
+/**
+ * The hospital spends its code and chooses its own username and password.
+ * @returns {Promise<{ok:true, session}|{ok:false, status, reason, message}>}
+ */
+async function activate(code, username, password) {
+  const r = await pendingFor(code);
+  if (!r.ok) return r;
+  const name = normaliseUsername(username);
+  if (!USERNAME_RE.test(name)) return { ok: false, status: 400, reason: 'BAD_USERNAME', message: USERNAME_RULE };
+  const problem = passwordProblem(password, name);
+  if (problem) return { ok: false, status: 400, reason: 'WEAK', message: problem };
+  const accounts = getAccounts();
+  const taken = await accounts.findByUsername(name);
+  if (taken && taken.account_id !== r.account.account_id) return { ok: false, status: 409, reason: 'TAKEN', message: 'That username is already in use. Choose another.' };
+  let updated;
+  try {
+    updated = await accounts.activate(r.account.account_id, r.hash, {
+      username: name, password_hash: await hashPassword(password), status: 'ACTIVE', must_change_password: false,
+      activation_code_hash: null, activation_expires_at: null, activated_at: new Date().toISOString(),
+      failed_attempts: 0, locked_until: null, last_login_at: new Date().toISOString(),
+      token_version: (r.account.token_version || 0) + 1,
+    });
+  } catch (err) {
+    if (err.code === 'DUPLICATE') return { ok: false, status: 409, reason: 'TAKEN', message: 'That username is already in use. Choose another.' };
+    throw err;
+  }
+  if (!updated) return { ok: false, status: 400, reason: 'INVALID_CODE', message: 'That activation code has already been used.' };
+  return { ok: true, session: sessionBody(updated, issueToken(updated)) };
 }
 
 /* ── First run ───────────────────────────────────────────────────────────── */
@@ -254,31 +414,22 @@ async function listAccounts({ q, state } = {}) {
  *   Bengaluru hospitals, with random passwords printed once in the log —
  *   unless DEMO_SEED=false. DEMO_PASSWORD fixes them for a rehearsed demo.
  */
-/* backend/seed/accounts.json: logins the project owner was handed, stored
-   here as bcrypt hashes only. Each is created at startup if its username does
-   not exist yet (so they also return after a restart on the in-memory store)
-   and is never overwritten — a password changed or reset from the admin
-   console stays changed while the database keeps it. */
-const SEED_FILE = process.env.ACCOUNT_SEED_FILE || require('path').join(__dirname, '..', '..', 'seed', 'accounts.json');
-
-async function seedFromFile(logger) {
-  let data;
-  try { data = JSON.parse(require('fs').readFileSync(SEED_FILE, 'utf8')); }
-  catch (err) { if (err.code !== 'ENOENT') logger.warn('⚠️  account seed file unreadable: ' + err.message); return 0; }
-  let created = 0;
-  for (const a of (data && data.accounts) || []) {
-    const username = normaliseUsername(a.username);
-    if (!USERNAME_RE.test(username) || ROLES.indexOf(a.role) === -1 || !/^\$2[aby]\$\d\d\$/.test(String(a.password_hash || ''))) {
-      logger.warn('⚠️  skipped invalid seed account: ' + a.username); continue;
-    }
-    if (a.role === 'HOSPITAL_STAFF' && !directory.get(a.hospital_id)) { logger.warn('⚠️  seed account ' + username + ': hospital ' + a.hospital_id + ' not in the directory'); continue; }
-    if (await getAccounts().findByUsername(username)) continue;
-    await getAccounts().create({ username, password_hash: a.password_hash, role: a.role,
-      hospital_id: a.role === 'HOSPITAL_STAFF' ? Number(a.hospital_id) : null, must_change_password: false, created_by: 'seed-file' });
-    created++;
+/* Up to v6 a file of built-in logins (backend/seed/accounts.json) was loaded
+   at every start. It is gone, and any login it ever created is retired here:
+   disabled, its password replaced by an unusable random hash and every token
+   voided — so those published passwords stop working on any server that runs
+   this code, including one whose database still holds them. */
+async function retireSeedAccounts(logger) {
+  const accounts = getAccounts();
+  let retired = 0;
+  for (const a of await accounts.list()) {
+    if (a.created_by !== 'seed-file' || a.status === 'DISABLED') continue;
+    await accounts.update(a.account_id, { status: 'DISABLED', password_hash: await hashPassword(crypto.randomBytes(32).toString('hex')),
+      token_version: (a.token_version || 0) + 1, failed_attempts: 0, locked_until: null });
+    retired++;
   }
-  if (created) logger.log('👤 created ' + created + ' login' + (created === 1 ? '' : 's') + ' from seed/accounts.json');
-  return created;
+  if (retired) logger.log('👤 retired ' + retired + ' built-in login' + (retired === 1 ? '' : 's') + ' from the old seed file');
+  return retired;
 }
 
 async function bootstrap(log) {
@@ -286,7 +437,7 @@ async function bootstrap(log) {
   const accounts = getAccounts();
   const prod = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
   const printed = [];
-  await seedFromFile(logger);
+  await retireSeedAccounts(logger);
 
   if ((await accounts.countByRole('SUPER_ADMIN')) === 0) {
     const envUser = normaliseUsername(process.env.SUPER_ADMIN_USERNAME || '');
@@ -309,7 +460,7 @@ async function bootstrap(log) {
 
   if (!prod && String(process.env.DEMO_SEED || 'true').toLowerCase() !== 'false' && (await accounts.countByRole('HOSPITAL_STAFF')) === 0) {
     for (const [username, id] of demoHospitals()) {
-      if (!directory.get(id)) continue;
+      if (!activeHospital(id)) continue;
       const pw = process.env.DEMO_PASSWORD || generatePassword();
       await accounts.create({ username, password_hash: await hashPassword(pw), role: 'HOSPITAL_STAFF', hospital_id: id, must_change_password: false, created_by: 'demo-seed' });
       printed.push([username, pw, directory.get(id).name]);
@@ -338,7 +489,9 @@ function demoHospitals() {
 
 module.exports = {
   login, verify, bearer, issueToken, changePassword, signOutEverywhere,
-  createHospitalAccount, resetPassword, setStatus, listAccounts, bootstrap,
+  createHospitalAccount, resetPassword, setStatus, listAccounts, accountState, bootstrap, retireSeedAccounts,
+  createPendingAccount, createPendingForAll, reissueActivation, lookupActivation, activate,
+  generateActivationCode, normaliseCode, hashCode,
   hashPassword, generatePassword, passwordProblem, suggestUsername, hospitalFor, secret,
-  ROLES, MIN_PASSWORD, MAX_FAILED, LOCK_MINUTES,
+  ROLES, MIN_PASSWORD, MAX_FAILED, LOCK_MINUTES, ACTIVATION_DAYS, USERNAME_RE,
 };

@@ -1,16 +1,18 @@
 {
   "name": "goldenhour-backend",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node src/start.js",
     "dev": "node src/server.js --memory",
     "demo": "node src/server.js --memory",
-    "test": "node tests/security.test.js && node tests/directory.test.js && node tests/auth.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/desk-arrival-tracking.test.js && node tests/tracking.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js",
-    "schema": "node -e \"process.stdout.write(require('./src/store/migrate').schemaSql())\""
+    "test": "node tests/security.test.js && node tests/directory.test.js && node tests/auth.test.js && node tests/activation.test.js && node tests/directory.mysql.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/desk-arrival-tracking.test.js && node tests/tracking.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js",
+    "schema": "node -e \"process.stdout.write(require('./src/store/migrate').schemaSql())\"",
+    "seed:hospitals": "node scripts/seed-hospitals.js"
   },
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1156.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

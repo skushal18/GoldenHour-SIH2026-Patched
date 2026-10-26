@@ -1,210 +1,168 @@
 /* ============================================================================
-   The all-India hospital directory.
+   The GoldenHour hospital network — the hospitals ambulances are matched to.
 
-   29,844 hospitals built from the Government of India's National Hospital
-   Directory (data.gov.in, NIHFW, Government Open Data Licence – India) plus
-   GoldenHour's curated Bengaluru list. See data/hospitals/README.md for how
-   the file is built and what each column means.
+   The source of truth is the `hospitals` table in MySQL (RDS in production).
+   It is read once at boot into an in-memory index (hospitalIndex) and every
+   change made through this module goes to the table first and the index
+   second, so a radius query per broadcast never needs a database round trip
+   and the index can never hold a hospital the table does not.
 
-   It is loaded into memory once at boot. That is deliberate: it is a few MB,
-   it changes only when the data file is rebuilt, and every broadcast needs a
-   radius query over it — a grid index in memory answers that in microseconds
-   with no database round trip, and works identically under the memory store.
+   The table starts with the 100 hospitals in data/hospitals/
+   network_hospitals.csv (seedNetwork, run by scripts/seed-hospitals.js); the
+   administrator adds more from the all-India catalogue (catalogueService).
 
-   Locations come in two grades, and callers must keep them apart:
-     coord_source = 'listed'  — the directory's own coordinates
-     coord_source = 'pincode' — the centre of the hospital's PIN code, which
-                                can be several kilometres out
-     coord_source = 'district' — the centre of its district, where the PIN
-                                code's location was implausible
+   Under the memory store (demos, tests) the same 100 are loaded straight
+   from the catalogue, so a demo sees the same network production does.
+
+   A hospital with active = 0 stays in the table (its logins and history
+   still point at it) but is never offered a case.
    ========================================================================== */
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const { createIndex, haversine } = require('./hospitalIndex');
+const catalogue = require('./catalogueService');
 
-const DEFAULT_FILE = path.join(__dirname, '..', '..', '..', 'data', 'hospitals', 'india_hospitals.csv');
-const CELL = 0.1;               // degrees per grid cell (~11 km)
+const index = createIndex();
+let pool = null;
+let source = null;          // 'mysql' | 'memory' | 'fixture'
 
-let byId = new Map();
-let grid = new Map();
-let all = [];
-let loadedFrom = null;
+const COLUMNS = ['id', 'source_id', 'name', 'state', 'district', 'pincode', 'address', 'phone', 'ownership',
+  'care_type', 'specialties', 'beds', 'emergency_likely', 'lat', 'lng', 'coord_source', 'active'];
 
-/* RFC 4180 CSV, quoted fields with embedded commas, quotes and newlines. */
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = '', i = 0, quoted = false;
-  while (i < text.length) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
-        quoted = false; i++; continue;
-      }
-      field += c; i++; continue;
-    }
-    if (c === '"') { quoted = true; i++; continue; }
-    if (c === ',') { row.push(field); field = ''; i++; continue; }
-    if (c === '\r') { i++; continue; }
-    if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
-    field += c; i++;
-  }
-  if (field !== '' || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-function toRecord(cols, values) {
-  const r = {};
-  cols.forEach((c, i) => { r[c] = values[i] === undefined ? '' : values[i]; });
-  const lat = r.lat === '' ? null : Number(r.lat);
-  const lng = r.lng === '' ? null : Number(r.lng);
+function fromRow(r) {
+  const num = v => (v == null || v === '' ? null : Number(v));
   return {
-    hospital_id: Number(r.id),
-    source_id: r.source_id,
-    name: r.name,
-    state: r.state,
-    district: r.district,
-    pincode: r.pincode || null,
-    address: r.address || null,
-    contact: r.phone || null,
-    ownership: r.ownership || null,
-    care_type: r.care_type || null,
-    system: r.system || null,
-    specialties: r.specialties || null,
-    beds: r.beds === '' ? null : Number(r.beds),
-    emergency_likely: r.emergency_likely === '1',
-    lat: Number.isFinite(lat) ? lat : null,
-    lng: Number.isFinite(lng) ? lng : null,
-    coord_source: r.coord_source || null,
-    curated: r.curated === '1',
+    hospital_id: Number(r.id), source_id: r.source_id || null, name: r.name, state: r.state || '', district: r.district || '',
+    pincode: r.pincode || null, address: r.address || null, contact: r.phone || null, ownership: r.ownership || null,
+    care_type: r.care_type || null, specialties: r.specialties || null, beds: num(r.beds),
+    emergency_likely: !!Number(r.emergency_likely), lat: num(r.lat), lng: num(r.lng),
+    coord_source: r.coord_source || null, active: r.active === undefined ? true : !!Number(r.active),
   };
 }
 
-function cellKey(lat, lng) { return Math.floor(lat / CELL) + ':' + Math.floor(lng / CELL); }
-
-function load(file) {
-  const target = file || process.env.HOSPITAL_DIRECTORY_FILE || DEFAULT_FILE;
-  byId = new Map(); grid = new Map(); all = [];
-  let text;
-  try { text = fs.readFileSync(target, 'utf8'); }
-  catch (err) {
-    console.warn('⚠️  hospital directory not loaded (' + target + '): ' + err.message);
-    loadedFrom = null;
-    return 0;
-  }
-  const rows = parseCsv(text);
-  const cols = rows.shift() || [];
-  for (const values of rows) {
-    if (values.length < 3) continue;
-    const h = toRecord(cols, values);
-    if (!Number.isInteger(h.hospital_id) || !h.name) continue;
-    byId.set(h.hospital_id, h);
-    all.push(h);
-    if (h.lat !== null && h.lng !== null) {
-      const k = cellKey(h.lat, h.lng);
-      if (!grid.has(k)) grid.set(k, []);
-      grid.get(k).push(h);
-    }
-  }
-  loadedFrom = target;
-  return all.length;
+function toRow(h) {
+  const cut = (v, n) => (v == null || v === '' ? null : String(v).slice(0, n));
+  return [Number(h.hospital_id), cut(h.source_id, 40), cut(h.name, 255), cut(h.state, 80), cut(h.district, 120),
+    cut(h.pincode, 10), cut(h.address, 500), cut(h.contact, 120), cut(h.ownership, 60), cut(h.care_type, 80),
+    cut(h.specialties, 255), h.beds == null ? null : Number(h.beds), h.emergency_likely ? 1 : 0,
+    h.lat == null ? null : Number(h.lat), h.lng == null ? null : Number(h.lng), cut(h.coord_source, 10),
+    h.active === false ? 0 : 1];
 }
 
-function ensureLoaded() { if (!loadedFrom && !all.length) load(); }
+const INSERT_IGNORE = 'INSERT IGNORE INTO hospitals (' + COLUMNS.join(', ') + ') VALUES ?';
 
-function haversine(lat1, lng1, lat2, lng2) {
-  const R = 6371, toRad = d => d * Math.PI / 180;
-  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+/* ── Loading ─────────────────────────────────────────────────────────────── */
+
+/** MySQL is live: read the network from the hospitals table. */
+async function attach(mysqlPool) {
+  pool = mysqlPool;
+  source = 'mysql';
+  return reload();
 }
 
-/** Hospitals within radiusKm of a point, nearest first, with distance_km. */
+async function reload() {
+  if (!pool) return index.count();
+  const [rows] = await pool.query('SELECT * FROM hospitals ORDER BY id');
+  index.replace(rows.map(fromRow));
+  return index.count();
+}
+
+/** Memory store: the starting network straight from the catalogue. */
+function useMemory() {
+  pool = null;
+  source = 'memory';
+  index.replace(catalogue.networkSeed().map(h => Object.assign({}, h, { active: true })));
+  return index.count();
+}
+
+/**
+ * Inserts the starting network into the hospitals table. Idempotent: rows that
+ * exist are left exactly as they are (INSERT IGNORE), so re-running it — or an
+ * administrator having switched a hospital off — changes nothing.
+ * @returns {Promise<{inserted:number, already:number, missing:number[]}>}
+ */
+async function seedNetwork(mysqlPool, file) {
+  const ids = catalogue.networkIds(file);
+  const records = ids.map(id => catalogue.get(id));
+  const missing = ids.filter((id, i) => !records[i]);
+  const present = records.filter(Boolean);
+  if (!present.length) return { inserted: 0, already: 0, missing };
+  const [res] = await mysqlPool.query(INSERT_IGNORE, [present.map(toRow)]);
+  const inserted = Number(res.affectedRows) || 0;
+  return { inserted, already: present.length - inserted, missing };
+}
+
+/* ── Changes (admin console) ─────────────────────────────────────────────── */
+
+/** Adds catalogue hospitals to the network. Hospitals already in it are left alone. */
+async function importFromCatalogue(ids) {
+  const want = Array.from(new Set((ids || []).map(Number).filter(Number.isInteger)));
+  const added = [], already = [], missing = [];
+  const fresh = [];
+  for (const id of want) {
+    if (index.get(id)) { already.push(id); continue; }
+    const h = catalogue.get(id);
+    if (!h) { missing.push(id); continue; }
+    fresh.push(Object.assign({}, h, { active: true }));
+  }
+  if (fresh.length) {
+    if (pool) { await pool.query(INSERT_IGNORE, [fresh.map(toRow)]); await reload(); }
+    else fresh.forEach(h => index.put(h));
+    fresh.forEach(h => added.push(h.hospital_id));
+  }
+  return { added, already, missing };
+}
+
+async function setActive(id, active) {
+  const h = index.get(id);
+  if (!h) return null;
+  if (pool) { await pool.query('UPDATE hospitals SET active=? WHERE id=?', [active ? 1 : 0, Number(id)]); await reload(); }
+  else index.put(Object.assign({}, h, { active: !!active }));
+  return index.get(id);
+}
+
+/* ── Queries ─────────────────────────────────────────────────────────────── */
+
+const isActive = h => h.active !== false;
+
+/** Any network hospital, active or not (logins and old cases still point at it). */
+function get(id) { return index.get(id); }
+
+/** Active network hospitals within radiusKm, nearest first. */
 function nearby(lat, lng, radiusKm, options) {
-  ensureLoaded();
-  const opts = options || {};
-  const la = Number(lat), lo = Number(lng), r = Number(radiusKm) || 15;
-  if (!Number.isFinite(la) || !Number.isFinite(lo)) return [];
-  const span = Math.ceil((r / 111) / CELL) + 1;
-  const ci = Math.floor(la / CELL), cj = Math.floor(lo / CELL);
-  const out = [];
-  for (let i = ci - span; i <= ci + span; i++) {
-    for (let j = cj - span; j <= cj + span; j++) {
-      const bucket = grid.get(i + ':' + j);
-      if (!bucket) continue;
-      for (const h of bucket) {
-        if (opts.emergencyOnly && !h.emergency_likely) continue;
-        if (opts.filter && !opts.filter(h)) continue;
-        const d = haversine(la, lo, h.lat, h.lng);
-        if (d <= r) out.push(Object.assign({}, h, { distance_km: Math.round(d * 10) / 10 }));
-      }
-    }
-  }
-  out.sort((a, b) => a.distance_km - b.distance_km);
-  return opts.limit ? out.slice(0, opts.limit) : out;
+  const opts = Object.assign({}, options);
+  const extra = opts.filter;
+  opts.filter = h => isActive(h) && (!extra || extra(h));
+  return index.nearby(lat, lng, radiusKm, opts);
 }
 
-function get(id) { ensureLoaded(); return byId.get(Number(id)) || null; }
-
-/** Name / district / pincode search for the admin console. */
 function search(query, options) {
-  ensureLoaded();
-  const opts = options || {};
-  const q = String(query || '').trim().toLowerCase();
-  const state = opts.state ? String(opts.state).toLowerCase() : null;
-  const limit = Math.min(Number(opts.limit) || 25, 200);
-  const terms = q.split(/\s+/).filter(Boolean);
-  const out = [];
-  for (const h of all) {
-    if (state && h.state.toLowerCase() !== state) continue;
-    if (opts.emergencyOnly && !h.emergency_likely) continue;
-    if (terms.length) {
-      const hay = (h.name + ' ' + h.district + ' ' + (h.pincode || '') + ' ' + h.state).toLowerCase();
-      if (!terms.every(t => hay.indexOf(t) !== -1)) continue;
-    }
-    out.push(h);
-    if (out.length >= limit) break;
+  const opts = Object.assign({ maxLimit: 500 }, options);
+  if (!opts.includeInactive) {
+    const extra = opts.filter;
+    opts.filter = h => isActive(h) && (!extra || extra(h));
   }
-  return out;
+  return index.search(query, opts);
 }
 
-function states() {
-  ensureLoaded();
-  const counts = new Map();
-  for (const h of all) counts.set(h.state, (counts.get(h.state) || 0) + 1);
-  return Array.from(counts.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
-}
+function states() { return index.states(); }
 
 function summary() {
-  ensureLoaded();
-  let listed = 0, pincode = 0, district = 0, none = 0, emergency = 0;
-  for (const h of all) {
-    if (h.coord_source === 'listed') listed++;
-    else if (h.coord_source === 'pincode') pincode++;
-    else if (h.coord_source === 'district') district++;
-    else none++;
-    if (h.emergency_likely) emergency++;
-  }
-  return { records: all.length, location_listed: listed, location_pincode: pincode, location_district: district, no_location: none,
-    emergency_likely: emergency, states: states().length, file: loadedFrom ? path.basename(loadedFrom) : null };
+  return Object.assign(index.summary(), { active: index.all().filter(isActive).length, source });
 }
 
-function count() { ensureLoaded(); return all.length; }
+function count() { return index.count(); }
+function list() { return index.all().slice(); }
 
-/** Test hook: load a small fixture instead of the national file. */
+/** Test hook: a small fixture instead of the network. */
 function loadRecords(records) {
-  byId = new Map(); grid = new Map(); all = [];
-  for (const raw of records) {
-    const h = Object.assign({ coord_source: 'listed', emergency_likely: true, state: '', district: '' }, raw);
-    byId.set(h.hospital_id, h); all.push(h);
-    if (h.lat != null && h.lng != null) {
-      const k = cellKey(h.lat, h.lng);
-      if (!grid.has(k)) grid.set(k, []);
-      grid.get(k).push(h);
-    }
-  }
-  loadedFrom = 'fixture';
+  pool = null;
+  source = 'fixture';
+  index.replace(records.map(raw => Object.assign({ coord_source: 'listed', emergency_likely: true, state: '', district: '', active: true }, raw)));
 }
 
-module.exports = { load, get, nearby, search, states, summary, count, haversine, parseCsv, loadRecords };
+module.exports = {
+  attach, reload, useMemory, seedNetwork, importFromCatalogue, setActive,
+  get, nearby, search, states, summary, count, list, loadRecords,
+  haversine, parseCsv: catalogue.parseCsv, fromRow, toRow, COLUMNS,
+};

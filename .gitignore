@@ -10,3 +10,4 @@ app/android/app/build/
 app/android/.gradle/
 app/android/local.properties
 app/android/app/src/main/assets/public/
+dist/
