@@ -47,8 +47,17 @@ jobs:
         run: npm test
 
   backend:
-    name: Backend · sign-in, directory, broadcast, tracking, capacity, audit
+    name: Backend · sign-in, activation, directory (MySQL 8.4), broadcast, tracking, capacity, audit
     runs-on: ubuntu-latest
+    # tests/directory.mysql.test.js runs against a real MySQL — the engine RDS runs.
+    services:
+      mysql:
+        image: mysql:8.4
+        env: { MYSQL_ROOT_PASSWORD: testpw, MYSQL_DATABASE: gh_test }
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping -ptestpw" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      TEST_MYSQL_URL: mysql://root:testpw@127.0.0.1:3306/gh_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -45,6 +45,14 @@ Parameters:
     Type: String
     Default: '8.4'
     Description: MySQL 8.4 LTS. 8.0 left standard support on 31 July 2026 and would bill RDS Extended Support.
+  DbBackupRetentionDays:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 35
+    Description: >-
+      Automated backup retention. The AWS Free plan allows only 1 day; after upgrading the
+      account to the Paid plan (the credit still applies), set 7.
   AlertEmail:
     Type: String
     Default: kushal.sentheel@gmail.com
@@ -53,7 +61,7 @@ Parameters:
     Default: 20
   HospitalSeedOnBoot:
     Type: String
-    Default: 'false'
+    Default: 'true'
     AllowedValues: ['true', 'false']
     Description: Load data/hospitals/network_hospitals.csv into an empty hospitals table at boot (idempotent).
   GitHubOidc:
@@ -244,7 +252,8 @@ Resources:
 
   # ==========================================================================
   # Data tier: RDS for MySQL, single-AZ db.t4g.micro, 20 GB gp3, encrypted,
-  # 7-day backups, private, master password managed by RDS.
+  # automated backups (DbBackupRetentionDays), private, master password
+  # managed by RDS.
   # ==========================================================================
   Database:
     Type: AWS::RDS::DBInstance
@@ -266,7 +275,7 @@ Resources:
       VPCSecurityGroups: [!Ref DbSecurityGroup]
       PubliclyAccessible: false
       MultiAZ: false
-      BackupRetentionPeriod: 7
+      BackupRetentionPeriod: !Ref DbBackupRetentionDays
       PreferredBackupWindow: '16:00-16:45'            # 21:30-22:15 IST
       PreferredMaintenanceWindow: 'sun:17:00-sun:17:45'
       AutoMinorVersionUpgrade: true

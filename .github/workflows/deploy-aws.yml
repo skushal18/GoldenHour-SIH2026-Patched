@@ -1,0 +1,126 @@
+name: Deploy to AWS
+
+# Every push to Patch-2: run the tests, then deploy the backend to Elastic
+# Beanstalk and the front-ends to S3 (+ CloudFront invalidation).
+#
+# Authenticates with GitHub OIDC — no AWS keys are stored in GitHub. The role
+# (goldenhour-github-deploy, infra/goldenhour.yaml, GitHubOidc=create) trusts
+# only this repository's Patch-2 branch. Set the repository variable
+# AWS_DEPLOY_ROLE_ARN to its ARN (Settings → Secrets and variables → Actions →
+# Variables). Until it is set, the deploy job is skipped with a notice.
+
+on:
+  push:
+    branches: [Patch-2]
+  workflow_dispatch:
+
+permissions:
+  id-token: write    # OIDC token for AWS
+  contents: read
+
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-2
+  EB_APP: goldenhour
+  EB_ENV: goldenhour-prod
+
+jobs:
+  test:
+    name: Tests (incl. MySQL 8.4)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env: { MYSQL_ROOT_PASSWORD: testpw, MYSQL_DATABASE: gh_test }
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping -ptestpw" --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm run setup
+      - run: npm test
+        env: { TEST_MYSQL_URL: 'mysql://root:testpw@127.0.0.1:3306/gh_test' }
+
+  deploy:
+    name: Deploy backend + front-ends
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Is the deploy role configured?
+        id: role
+        run: |
+          if [ -z "${{ vars.AWS_DEPLOY_ROLE_ARN }}" ]; then
+            echo "::notice::AWS_DEPLOY_ROLE_ARN is not set — skipping the deploy (see the comment at the top of this workflow)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.role.outputs.ready == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.role.outputs.ready == 'true'
+        with: { node-version: '22' }
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.role.outputs.ready == 'true'
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: goldenhour-deploy-${{ github.run_id }}
+
+      - name: Build
+        if: steps.role.outputs.ready == 'true'
+        run: infra/scripts/build.sh
+
+      - name: Find the stack's buckets and distribution
+        if: steps.role.outputs.ready == 'true'
+        id: stack
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          echo "artifacts=goldenhour-artifacts-$ACCOUNT" >> "$GITHUB_OUTPUT"
+          echo "site=goldenhour-web-$ACCOUNT" >> "$GITHUB_OUTPUT"
+          DIST=$(aws cloudfront list-distributions --query "DistributionList.Items[?Origins.Items[?DomainName=='goldenhour-web-$ACCOUNT.s3.$AWS_REGION.amazonaws.com']].Id | [0]" --output text)
+          echo "distribution=$DIST" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the backend to Elastic Beanstalk
+        if: steps.role.outputs.ready == 'true'
+        env:
+          BUCKET: ${{ steps.stack.outputs.artifacts }}
+        run: |
+          LABEL="${GITHUB_SHA::12}-${GITHUB_RUN_ATTEMPT}"
+          KEY="backend/$LABEL.zip"
+          aws s3 cp dist/backend.zip "s3://$BUCKET/$KEY"
+          aws elasticbeanstalk create-application-version --application-name "$EB_APP" --version-label "$LABEL" \
+            --description "${GITHUB_SHA::12} ${GITHUB_REF_NAME}" --source-bundle S3Bucket="$BUCKET",S3Key="$KEY" --process
+          aws elasticbeanstalk update-environment --environment-name "$EB_ENV" --version-label "$LABEL"
+          aws elasticbeanstalk wait environment-updated --environment-names "$EB_ENV"
+          aws elasticbeanstalk describe-environments --environment-names "$EB_ENV" \
+            --query 'Environments[0].[VersionLabel,Status,Health]' --output text
+
+      - name: Publish the front-ends
+        if: steps.role.outputs.ready == 'true'
+        env:
+          SITE: ${{ steps.stack.outputs.site }}
+          DIST: ${{ steps.stack.outputs.distribution }}
+        run: |
+          # Pages and scripts must be re-read on every deploy; vendored libraries can be cached.
+          aws s3 sync dist/web "s3://$SITE" --delete --exclude 'vendor/*' --cache-control 'no-cache'
+          aws s3 sync dist/web/vendor "s3://$SITE/vendor" --delete --cache-control 'public, max-age=86400'
+          aws cloudfront create-invalidation --distribution-id "$DIST" --paths '/*'
+
+      - name: Smoke test
+        if: steps.role.outputs.ready == 'true'
+        env:
+          DIST: ${{ steps.stack.outputs.distribution }}
+        run: |
+          HOST=$(aws cloudfront get-distribution --id "$DIST" --query Distribution.DomainName --output text)
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "https://$HOST/health" | tee /tmp/health.json | grep -q '"store":"mysql"'; then cat /tmp/health.json; exit 0; fi
+            sleep 10
+          done
+          echo "::error::https://$HOST/health is not healthy on MySQL"; cat /tmp/health.json || true; exit 1
