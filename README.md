@@ -51,7 +51,9 @@ Live: **https://d1k7k7ahunvfhc.cloudfront.net** — `/hospital` (ER desk), `/adm
 | Secrets | RDS-managed master password and `goldenhour/app` (JWT secret, first administrator) in Secrets Manager, read at boot with the instance role |
 | Watch | `/health` probe every 5 minutes, RDS CPU and storage alarms (email), US$20 monthly budget |
 
-Region ap-southeast-2, account 109933871250, everything tagged `Project=GoldenHour`. Rebuild: `aws cloudformation deploy … infra/goldenhour.yaml` then `infra/scripts/deploy.sh` ([`infra/README.md`](infra/README.md)). Deploys: GitHub Actions on pushes to `Patch-2` (OIDC — waiting on the organisation to allow the OIDC provider) or `infra/scripts/deploy.sh`. Between demos: `infra/scripts/power.sh stop|start`. Resource IDs, costs and operations: [`deploy/aws/README.md`](deploy/aws/README.md).
+Region ap-southeast-2, account 109933871250, everything tagged `Project=GoldenHour`. Rebuild: `aws cloudformation deploy … infra/goldenhour.yaml` then `infra/scripts/deploy.sh` ([`infra/README.md`](infra/README.md)). Deploys: GitHub Actions on pushes to `Patch-2` (OIDC — waiting on the organisation to allow the OIDC provider) or `infra/scripts/deploy.sh`. Sleep/wake by hand: `infra/scripts/power.sh stop|start`. Resource IDs, costs and operations: [`deploy/aws/README.md`](deploy/aws/README.md).
+
+It **sleeps after 2 idle hours** (instance and database stopped) and wakes on the next request in ~8–10 minutes — the pages say so and reconnect by themselves. Links and the admin / hospital how-to: [`docs/GOLDENHOUR-GUIDE.md`](docs/GOLDENHOUR-GUIDE.md).
 
 The server runs with `NODE_ENV=production`: signed-in desks, strong secret, MySQL only, CORS limited to the APK (`https://localhost`), and `HACKATHON_MODE=false` — a case goes to hospitals with an active login inside the crew's radius.
 

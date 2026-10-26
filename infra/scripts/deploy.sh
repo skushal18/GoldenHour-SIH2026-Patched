@@ -14,6 +14,14 @@ APP=$(out BeanstalkApplication); ENVNAME=$(out BeanstalkEnvironment); URL=$(out 
 
 "$ROOT/infra/scripts/build.sh"
 
+# It may be asleep (2 idle hours): wake it and wait for /health before deploying.
+for i in $(seq 1 30); do
+  curl -fsS "$URL/health" >/dev/null 2>&1 && break
+  [ "$i" = 1 ] && echo "GoldenHour is asleep — waking it (up to ~10 minutes)…"
+  curl -sS "$URL/wake" >/dev/null 2>&1 || true
+  sleep 30
+done
+
 if [ "${1:-all}" != web ]; then
   LABEL="$(git -C "$ROOT" rev-parse --short=12 HEAD)-$(date +%s)"
   aws s3 cp "$ROOT/dist/backend.zip" "s3://$ARTIFACTS/backend/$LABEL.zip"

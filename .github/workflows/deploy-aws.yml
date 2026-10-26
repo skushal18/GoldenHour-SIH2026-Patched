@@ -87,6 +87,19 @@ jobs:
           DIST=$(aws cloudfront list-distributions --query "DistributionList.Items[?Origins.Items[?DomainName=='goldenhour-web-$ACCOUNT.s3.$AWS_REGION.amazonaws.com']].Id | [0]" --output text)
           echo "distribution=$DIST" >> "$GITHUB_OUTPUT"
 
+      - name: Wake the stack if it is asleep (2 idle hours)
+        if: steps.role.outputs.ready == 'true'
+        env:
+          DIST: ${{ steps.stack.outputs.distribution }}
+        run: |
+          HOST=$(aws cloudfront get-distribution --id "$DIST" --query Distribution.DomainName --output text)
+          for i in $(seq 1 30); do
+            curl -fsS "https://$HOST/health" >/dev/null 2>&1 && exit 0
+            curl -sS "https://$HOST/wake" || true; echo
+            sleep 30
+          done
+          echo "::error::GoldenHour did not wake within 15 minutes"; exit 1
+
       - name: Deploy the backend to Elastic Beanstalk
         if: steps.role.outputs.ready == 'true'
         env:

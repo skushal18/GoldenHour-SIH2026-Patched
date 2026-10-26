@@ -6,7 +6,7 @@
 | `eb/` | Copied into the Beanstalk bundle: `Procfile` (`node backend/src/start.js`) and `.platform/nginx/` (WebSocket upgrade, 13 MB bodies) |
 | `scripts/build.sh` | Builds `dist/backend.zip` (Beanstalk bundle) and `dist/web/` (front-ends for S3) |
 | `scripts/deploy.sh` | Deploys the checkout with the AWS CLI (same steps as `.github/workflows/deploy-aws.yml`) |
-| `scripts/power.sh` | `stop` / `start` / `status` between demos |
+| `scripts/power.sh` | `stop` / `start` / `status` — sleep or wake by hand |
 | `scripts/pack-web.js` | Packs `dist/web` into one JSON file, for sessions that can upload one file but not run `aws s3 sync` |
 
 The resources, IDs, costs and how to operate them are in [`deploy/aws/README.md`](../deploy/aws/README.md).
@@ -36,6 +36,7 @@ Parameters worth knowing (defaults in brackets):
 | `DbEngineVersion` [`8.4`] | MySQL 8.4 LTS — do not use 8.0 (Extended Support charges) |
 | `DbBackupRetentionDays` [`1`] | the Free plan allows 1; set 7 on the Paid plan |
 | `HospitalSeedOnBoot` [`true`] | seed `data/hospitals/network_hospitals.csv` into an empty table |
+| `IdleStopMinutes` [`120`] | sleep (instance 0, RDS stopped) after this long without a request; `/wake` or any page visit starts it again |
 | `GitHubOidc` [`none`] | `create` (also creates the OIDC provider) or `existing`; blocked by the org SCP today |
 | `AlertEmail`, `MonthlyBudgetUsd` [`20`] | alarms and budget |
 

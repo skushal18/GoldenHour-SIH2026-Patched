@@ -1,6 +1,6 @@
 # GoldenHour on AWS — three tiers
 
-Live: **https://d1k7k7ahunvfhc.cloudfront.net** — `/hospital` (ER desk), `/hospital/#activate` (first-time activation), `/admin`, `/ambulance`, `/health`.
+Live: **https://d1k7k7ahunvfhc.cloudfront.net** — `/hospital` (ER desk), `/hospital/#activate` (first-time activation), `/admin`, `/ambulance`, `/health`, `/wake`. All links and the sign-in / activation steps for users: [`docs/GOLDENHOUR-GUIDE.md`](../../docs/GOLDENHOUR-GUIDE.md).
 
 Account `109933871250`, region **ap-southeast-2 (Sydney)** only. Everything is one CloudFormation stack, **`goldenhour`**, defined in [`infra/goldenhour.yaml`](../../infra/goldenhour.yaml); every resource is tagged `Project=GoldenHour`.
 
@@ -48,6 +48,8 @@ Account `109933871250`, region **ap-southeast-2 (Sydney)** only. Everything is o
 | Monitoring | Health probe | Lambda `goldenhour-health-probe`, every 5 min (rule `goldenhour-health-probe`), GET `/health`, fails unless healthy on MySQL |
 | | Alarms → SNS `goldenhour-alerts` (email) | `goldenhour-health-failing` (2 failed probes), `goldenhour-db-cpu-high` (>80 % 15 min), `goldenhour-db-storage-low` (<2 GiB) |
 | | Budget | `goldenhour-monthly` US$20 — email at 80 % and 100 % actual, 100 % forecast |
+| Sleep / wake | Sleeper | Lambda `goldenhour-idle-sleeper`, every 15 min (rule `goldenhour-idle-sleeper`) — after `IdleStopMinutes` (120) without a request: instance → 0, RDS stopped, probe paused |
+| | Waker | Lambda `goldenhour-waker` behind CloudFront `/wake` (function URL, OAC `goldenhour-waker`) — starts RDS and the instance |
 | Deploy | Artifacts bucket | `goldenhour-artifacts-109933871250` (`backend/*.zip`, `cfn/goldenhour.yaml`) |
 
 No secret value is in the code, git, the template, stack outputs, environment variables or logs: the Beanstalk environment holds only the two secret **ARNs** and `backend/src/start.js` reads them at boot with the instance role (`backend/src/config/awsSecrets.js`). A rotated RDS password reaches the connection pool within 5 minutes without a restart.
@@ -65,15 +67,15 @@ No secret value is in the code, git, the template, stack outputs, environment va
 - **From a laptop** with the AWS CLI signed in: `infra/scripts/deploy.sh` (backend + front-ends) or `infra/scripts/deploy.sh web`.
 - **The APK** reads `app/www/config.js` (`SERVER_BASE: "https://d1k7k7ahunvfhc.cloudfront.net"`, `CORS_ORIGIN=https://localhost` on the server). GitHub → Actions → **Build GoldenHour APK** builds it; it also runs on pushes to `Patch-2` that touch `app/`. The web copy at `/ambulance` uses the page's own origin.
 
-## Stop between demos (cost option B)
+## Sleeps when idle, wakes on demand
 
-```bash
-infra/scripts/power.sh stop     # instance → 0, RDS stopped, health probe paused  (~US$4/month while stopped)
-infra/scripts/power.sh start    # ~10 minutes; RDS start is the slow part
-infra/scripts/power.sh status
-```
-
-RDS starts itself again after 7 days stopped — run `stop` again. Data in RDS is kept.
+- After **2 hours** with no real request (any API call or new realtime connection — `/health` does not count) the sleeper scales the Beanstalk instance to **0**, stops **RDS** and pauses the health probe.
+- While asleep the static pages still load; the API answers **504** within ~4 s. The ER desk, the admin console and the ambulance app then call **`/wake`** (at most once a minute) and show "GoldenHour is starting up…". The waker starts RDS and the instance; the app answers again after **~8–10 minutes** and the pages reconnect by themselves.
+- A case sent from the ambulance app while asleep waits in the app's outbox and is sent when the server is back.
+- An open ER desk polls every 10 s, so it keeps the stack awake — close desk screens you are not using.
+- RDS restarts itself after 7 days stopped; the sleeper stops it again within 15 minutes.
+- Change the idle time with the stack parameter `IdleStopMinutes`. Deploying while asleep fails — open `/wake` first and wait ~10 minutes.
+- By hand: `infra/scripts/power.sh stop | start | status`, or open https://d1k7k7ahunvfhc.cloudfront.net/wake.
 
 ## Costs (Sydney, on demand, from the AWS Pricing API)
 
@@ -87,9 +89,9 @@ RDS starts itself again after 7 days stopped — run `stop` again. Data in RDS i
 | Secrets Manager (2 secrets) | 0.80 |
 | CloudWatch logs + 3 alarms, Lambda, S3, CloudFront (free allowance), Budgets | ~1.10 |
 | **Running all month** | **≈ 35** |
-| **Stopped** (EIP, disks, secrets, RDS storage) | **≈ 4** |
+| **Asleep** (EIP, RDS storage, secrets) | **≈ 4** |
 
-Run it only for demos and it stays under ~US$25. MySQL 8.4 (not 8.0) on purpose: 8.0 left standard support on 31 July 2026 and would add RDS Extended Support charges (≈ US$150/month for this instance); the template also sets `EngineLifecycleSupport: open-source-rds-extended-support-disabled`.
+With the 2-hour idle sleep you pay roughly US$4 plus about US$0.05 per hour it is awake (≈ US$12/month at 8 hours a day). MySQL 8.4 (not 8.0) on purpose: 8.0 left standard support on 31 July 2026 and would add RDS Extended Support charges (≈ US$150/month for this instance); the template also sets `EngineLifecycleSupport: open-source-rds-extended-support-disabled`.
 
 **Free plan limit:** automated backups are capped at **1 day** on the AWS Free plan (RDS refused 7). After upgrading the account to the Paid plan (the credit still applies), update the stack with `DbBackupRetentionDays=7`.
 
@@ -104,12 +106,6 @@ Run it only for demos and it stays under ~US$25. MySQL 8.4 (not 8.0) on purpose:
 
 See [`infra/README.md`](../../infra/README.md): one `CreateStack` (or `UpdateStack`) with `infra/goldenhour.yaml`, then one deploy.
 
-## Previous deployment (EC2) — still running until you retire it
+## Previous deployment (EC2) — retired 26 Oct 2026
 
-| Resource | ID |
-|---|---|
-| EC2 | `i-04a337bf8a7adf656` (t4g.small, MariaDB on the instance), Elastic IP `52.64.219.180` (`eipalloc-0dfad13823fd82e6b`) |
-| CloudFront | `EXTEH411I2R7O` → `d31kwkffv9iv72.cloudfront.net` |
-| Security group / IAM | `sg-07d01f03ac0ab235c` (`goldenhour-web`), role + profile `goldenhour-ec2-role` |
-
-It pulls `Patch-2` every 3 minutes. **When v7 is merged into `Patch-2`, that server runs v7 too**: its `hospitals` table is empty (it has no `HOSPITAL_SEED_ON_BOOT`), so it matches no hospital, and the old built-in logins are retired there. Retire it (terminate the instance, release the Elastic IP, disable then delete the distribution, delete the security group and IAM role) before or right after merging — ~US$17/month.
+Deleted: EC2 `i-04a337bf8a7adf656` (and its disk and MariaDB data), Elastic IP `52.64.219.180`, CloudFront `EXTEH411I2R7O` (`d31kwkffv9iv72.cloudfront.net`), security group `sg-07d01f03ac0ab235c`, IAM role and instance profile `goldenhour-ec2-role`. `deploy/aws/ec2-user-data.sh` is kept only as history.
