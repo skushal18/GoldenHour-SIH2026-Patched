@@ -74,6 +74,13 @@ async function main() {
   const h3 = await call('GET', '/health');
   await check('an API request does', () => assert.ok(h3.body.last_activity_at > before));
 
+  group('The APK (origin https://localhost) may send its crew token cross-origin');
+  const pre = await fetch(BASE + '/api/v1/requests/GH-2026-0001', { method: 'OPTIONS', headers: {
+    Origin: 'https://localhost', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-crew-token' } });
+  await check('the CORS preflight allows X-Crew-Token', () => {
+    assert.ok(/x-crew-token/i.test(pre.headers.get('access-control-allow-headers') || ''), pre.headers.get('access-control-allow-headers'));
+  });
+
   group('The administrator creates logins for every hospital at once');
   const bulk = await call('POST', '/api/v1/admin/accounts/activation-codes', {}, admin);
   const codes = new Map((bulk.body.created || []).map(c => [c.hospital_id, c]));
