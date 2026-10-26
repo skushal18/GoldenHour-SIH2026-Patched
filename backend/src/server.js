@@ -158,9 +158,26 @@ socketHandler(io);
 
 const PORT = Number(process.env.PORT) || 5000;
 
+/* The database may be starting (on AWS it is stopped while the stack sleeps
+   and started by the first request). DB_WAIT_SECONDS: keep retrying the first
+   connection this long instead of exiting — exiting would make systemd
+   restart the process in a tight loop until it gives up for good. Unset (the
+   default) an unreachable database is an immediate, loud failure. */
+async function initStoreWhenReachable() {
+  const until = Date.now() + (Number(process.env.DB_WAIT_SECONDS) || 0) * 1000;
+  for (;;) {
+    try { return await initStore(); }
+    catch (err) {
+      if (Date.now() + 10000 > until) throw err;
+      console.warn('⏳ database not reachable yet (' + err.message + ') — retrying in 10 s');
+      await new Promise(r => setTimeout(r, 10000));
+    }
+  }
+}
+
 (async () => {
   try {
-    await initStore();
+    await initStoreWhenReachable();
     const pool = getPool();
     if (pool) {
       if (String(process.env.HOSPITAL_SEED_ON_BOOT || '').toLowerCase() === 'true') {

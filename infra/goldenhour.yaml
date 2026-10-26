@@ -399,6 +399,7 @@ Resources:
         - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: ALLOW_MANUAL_HOSPITAL_OVERRIDE, Value: 'false' }
         - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: CORS_ORIGIN, Value: 'https://localhost' }
         - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: TRUST_PROXY, Value: '2' }
+        - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: DB_WAIT_SECONDS, Value: '1800' }
         - { Namespace: 'aws:elasticbeanstalk:application:environment', OptionName: HOSPITAL_SEED_ON_BOOT, Value: !Ref HospitalSeedOnBoot }
 
   # ==========================================================================
