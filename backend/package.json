@@ -1,6 +1,6 @@
 {
   "name": "goldenhour-backend",
-  "version": "7.0.0",
+  "version": "8.0.0",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/start.js",

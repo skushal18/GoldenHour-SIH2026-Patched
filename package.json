@@ -1,6 +1,6 @@
 {
   "name": "goldenhour",
-  "version": "6.0.0",
+  "version": "8.0.0",
   "private": true,
   "license": "MIT",
   "description": "Pre-arrival emergency coordination between ambulance crews and hospital emergency departments.",
