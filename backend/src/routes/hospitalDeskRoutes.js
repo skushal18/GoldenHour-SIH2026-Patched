@@ -13,6 +13,7 @@ const deskLocation = require('../services/deskLocationService');
 const capacity = require('../services/capacityService');
 const tracking = require('../services/trackingService');
 const audit = require('../services/auditService');
+const match = require('../services/matchService');
 
 router.use(deskGuard);
 
@@ -146,35 +147,54 @@ router.get('/handover/:caseCode', async (req, res) => {
       broadcast_to_accept: record.accepted_at ? Math.round((new Date(record.accepted_at)-new Date(record.created_at))/1000) : null,
       accept_to_arrival: record.arrived_at && record.accepted_at ? Math.round((new Date(record.arrived_at)-new Date(record.accepted_at))/1000) : null,
     };
+    const h = directory.get(Number(req.hospital.hospital_id)) || {};
     res.json({
-      case_code: record.case_code, priority: record.priority,
-      hospital: req.hospital, ambulance_id: record.ambulance_id,
+      case_code: record.case_code, priority: record.priority, status: record.status,
+      hospital: Object.assign({}, req.hospital, { address: h.address || null, phone: h.contact || req.hospital.contact || null }),
+      ambulance_id: record.ambulance_id,
       created_at: record.created_at, accepted_at: record.accepted_at, arrived_at: record.arrived_at,
-      intervals,
+      intervals: Object.assign(intervals, {
+        broadcast_to_arrival: record.arrived_at ? Math.round((new Date(record.arrived_at)-new Date(record.created_at))/1000) : null,
+      }),
       patient_history: record.patient_history || [],
-      patient: record.patient, vitals_initial_vs_latest: vitalsHistory(record),
+      patient: record.patient, patient_at_broadcast: patientAtBroadcast(record),
+      vitals_initial_vs_latest: vitalsHistory(record),
       chief_complaint: record.chief_complaint, case_category: record.case_category,
       critical_flags: record.critical_flags, stroke_assessment: record.stroke_assessment,
+      needs: match.needsFromCase(record),
       resources: record.resources, notes: record.notes, etas: { eta_minutes: record.eta_minutes,
         live_eta_minutes: record.live_eta_minutes, eta_source: record.eta_source },
       track_aggregate: record.last_position ? { last: record.last_position } : null,
+      origin: record.origin || null,
       images: record.images || [],
       distance_km: winner ? winner.distance_km : null,
+      hospitals_notified: record.targets.length,
     });
   }catch(e){ res.status(500).json({ success:false }); }
 });
 
-function vitalsHistory(record){
-  const initial = record.patient && record.patient.vitals;
-  const last = record.patient_history && record.patient_history.length
-    ? (record.patient_history[record.patient_history.length-1].changed || {})
-    : null;
-  const out = [];
-  for (const k of (initial ? Object.keys(initial) : [])){
-    out.push({ key: k, initial: initial ? initial[k] : null,
-      latest: last && last['vitals.'+k] ? last['vitals.'+k][1] : (initial?initial[k]:null) });
+/* record.patient holds the CURRENT values: every crew edit is applied to it,
+   and patient_history keeps each change as [before, after]. The value at
+   broadcast is therefore the "before" of the first change to that field. */
+function patientAtBroadcast(record){
+  const now = JSON.parse(JSON.stringify(record.patient || {}));
+  const first = {};
+  for (const entry of (record.patient_history || [])) {
+    for (const [k, pair] of Object.entries(entry.changed || {})) if (!(k in first) && Array.isArray(pair)) first[k] = pair[0];
   }
-  return out;
+  for (const [k, v] of Object.entries(first)) {
+    if (k.startsWith('vitals.')) { now.vitals = now.vitals || {}; now.vitals[k.slice(7)] = v; }
+    else now[k] = v;
+  }
+  return now;
+}
+
+function vitalsHistory(record){
+  const latest = (record.patient && record.patient.vitals) || {};
+  const initial = patientAtBroadcast(record).vitals || {};
+  const keys = ['systolic_bp', 'diastolic_bp', 'heart_rate', 'resp_rate', 'spo2', 'glucose']
+    .filter(k => k in latest || k in initial);
+  return keys.map(k => ({ key: k, initial: initial[k] == null ? null : initial[k], latest: latest[k] == null ? null : latest[k] }));
 }
 
 /* v5 ── Timeline ── */

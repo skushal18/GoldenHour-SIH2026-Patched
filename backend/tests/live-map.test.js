@@ -106,6 +106,27 @@ async function run() {
   assert.ok(Math.abs(live.distance_km - tracking.haversine(12.9176, 77.6080, 12.9310, 77.6200)) < 0.01);
   ok('when the desk moves, its live cases are re-measured at once');
 
+  console.log('\nhandover sheet');
+  {
+    const { io } = require('socket.io-client');
+    const sock = io(base, { transports: ['websocket'], forceNew: true });
+    await new Promise(r => sock.on('connect', r));
+    const upd = patch => new Promise(r => sock.emit('patient:update', { case_code: code, crew_token: crew, patient: patch }, r));
+    assert.equal((await upd({ vitals: { systolic_bp: 92, spo2: 93 } })).success, true);
+    assert.equal((await upd({ vitals: { systolic_bp: 98 }, consciousness: 'Conscious' })).success, true);
+    sock.close();
+    const ho = (await req('/desk/handover/' + code, 'GET', null, tokens.desk)).body;
+    const sbp = ho.vitals_initial_vs_latest.find(v => v.key === 'systolic_bp');
+    const spo2 = ho.vitals_initial_vs_latest.find(v => v.key === 'spo2');
+    assert.deepEqual([sbp.initial, sbp.latest], [null, 98], 'never measured at the alert, 98 now');
+    assert.deepEqual([spo2.initial, spo2.latest], [null, 93]);
+    assert.equal(ho.patient_at_broadcast.consciousness, null);
+    assert.equal(ho.patient.consciousness, 'Conscious');
+    assert.equal(ho.hospital.name, "St John's Medical College Hospital");
+    assert.ok(ho.needs && typeof ho.needs.needs_blood === 'boolean');
+    ok('handover: "at alert" keeps the values sent at the alert, "latest" the crew\'s last update; hospital and needs included');
+  }
+
   console.log('\nlive map — admin network map');
   const fresh = await req('/requests', 'POST', { case_type_id: 2, age: 50, gender: 'M', origin: { lat: 12.95, lng: 77.6 }, broadcast_radius_km: 15 });
   const adm = await req('/admin/live', 'GET', null, tokens.admin);

@@ -630,19 +630,128 @@
     state.timers.push(timer);
   }
 
+  /* ── handover sheet ──────────────────────────────────────────────────────
+     A one-page A4 summary for the resus team, previewed on screen first and
+     printed from there. Everything a nurse needs at the door: who is coming,
+     how sick (colour AND words, so it survives a black-and-white printer),
+     what changed on the way, what to have ready, and space to sign. */
+  var VITALS = {
+    systolic_bp: ['Systolic BP', 'mmHg', '100–139'], diastolic_bp: ['Diastolic BP', 'mmHg', '60–89'],
+    heart_rate: ['Heart rate', 'bpm', '60–100'], resp_rate: ['Respiratory rate', '/min', '12–20'],
+    spo2: ['SpO₂', '%', '≥ 95'], glucose: ['Glucose', 'mg/dL', '70–140'],
+  };
+  var PRIO = {
+    RED: ['RED · CRITICAL', 'Immediate — prepare resuscitation'],
+    AMBER: ['AMBER · URGENT', 'Urgent — assess on arrival'],
+    GREEN: ['GREEN · STABLE', 'Stable — standard assessment'],
+  };
+  var FLAG_TEXT = {
+    cardiac_arrest: ['Cardiac arrest', 'Case reported as cardiac arrest'], airway_compromise: ['Airway compromise', 'Airway at risk'],
+    shock: ['Shock', 'Systolic BP below 90 mmHg'], hypoxia: ['Hypoxia', 'SpO₂ below 90 %'], low_gcs: ['Unconscious', 'Not responding'],
+  };
+  var NEED_TEXT = { needs_ventilator: 'Ventilator', needs_blood: 'Blood products', needs_imaging: 'CT / imaging', needs_ot: 'Operating theatre', needs_cathlab: 'Cath lab' };
+  var FIELD_TEXT = { age: 'Age', gender: 'Sex', blood_group: 'Blood group', consciousness: 'Consciousness' };
+
+  function hoTime(iso) { return iso ? GH.timeOf(iso) : '—'; }
+  function hoDur(sec) { if (sec == null) return ''; return sec < 90 ? Math.round(sec) + ' s' : Math.round(sec / 60) + ' min'; }
+  function hoVal(k, v) { return v == null || v === '' ? '—' : (k === 'spo2' ? v + ' %' : String(v)); }
+
+  function handoverHtml(d) {
+    var p = d.patient || {}, h = d.hospital || {}, pr = PRIO[d.priority] || PRIO.GREEN;
+    var arrived = !!d.arrived_at;
+    var flags = Object.keys(FLAG_TEXT).filter(function (k) { return d.critical_flags && d.critical_flags[k]; });
+    var needs = Object.keys(NEED_TEXT).filter(function (k) { return d.needs && d.needs[k]; });
+    var rows = (d.vitals_initial_vs_latest || []).map(function (v) {
+      var meta = VITALS[v.key] || [v.key, '', ''];
+      var b = band(v.key, v.latest), b0 = band(v.key, v.initial);
+      var change = '';
+      if (v.initial != null && v.latest != null && Number(v.initial) !== Number(v.latest)) {
+        change = (Number(v.latest) > Number(v.initial) ? '▲ ' : '▼ ') + Math.abs(Number(v.latest) - Number(v.initial));
+      }
+      var status = v.latest == null ? '<span class="ho-st">Not taken</span>'
+        : (b && b.cls ? '<span class="ho-st ho-' + b.cls + '">' + esc(b.cls === 'critical' ? 'CRITICAL ' : '') + esc(b.word) + '</span>' : '<span class="ho-st ho-ok">Normal</span>');
+      return '<tr><th>' + esc(meta[0]) + ' <small>' + esc(meta[1]) + '</small></th>' +
+        '<td class="' + (b0 && b0.cls ? 'ho-v-' + b0.cls : '') + '">' + esc(hoVal(v.key, v.initial)) + '</td>' +
+        '<td class="ho-latest ' + (b && b.cls ? 'ho-v-' + b.cls : '') + '">' + esc(hoVal(v.key, v.latest)) + '</td>' +
+        '<td class="ho-chg">' + esc(change) + '</td><td>' + status + '</td><td class="ho-range">' + esc(meta[2]) + '</td></tr>';
+    }).join('');
+    var changes = (d.patient_history || []).map(function (e) {
+      var bits = Object.keys(e.changed || {}).map(function (k) {
+        var pair = e.changed[k], name = k.indexOf('vitals.') === 0 ? (VITALS[k.slice(7)] || [k])[0] : (FIELD_TEXT[k] || k);
+        var from = k === 'age' ? GH.ageBand(pair[0]) : (pair[0] == null ? '—' : pair[0]);
+        var to = k === 'age' ? GH.ageBand(pair[1]) : (pair[1] == null ? '—' : pair[1]);
+        return '<b>' + esc(name) + '</b> ' + esc(from) + ' → ' + esc(to);
+      });
+      return '<li><span class="ho-when">' + esc(hoTime(e.at)) + '</span> ' + bits.join(' · ') + '</li>';
+    }).join('');
+    var s = d.stroke_assessment, fast = '';
+    if (s) {
+      var pos = ['face', 'arm', 'speech'].filter(function (k) { return s[k]; });
+      fast = '<div class="ho-box ho-fast"><h3>Stroke screen (FAST)</h3><p><b>' + esc(pos.length ? pos.join(' + ') + ' positive' : 'No deficit found') + '</b> · ' +
+        esc(s.onset_hours != null ? s.onset_hours + ' h since onset' : 'onset time unknown') + '</p></div>';
+    }
+    var steps = [
+      ['Alert sent by crew', d.created_at, d.hospitals_notified ? 'to ' + d.hospitals_notified + ' hospital' + (d.hospitals_notified === 1 ? '' : 's') : ''],
+      ['Accepted by ' + (h.name || 'this hospital'), d.accepted_at, d.intervals && d.intervals.broadcast_to_accept != null ? hoDur(d.intervals.broadcast_to_accept) + ' after alert' : ''],
+      [arrived ? 'Arrived' : 'Arrival', d.arrived_at, arrived && d.intervals && d.intervals.accept_to_arrival != null ? hoDur(d.intervals.accept_to_arrival) + ' en route' : (d.etas && d.etas.eta_minutes != null ? 'crew ETA ' + d.etas.eta_minutes + ' min' : 'not yet')],
+    ];
+    var photos = (d.images || []).slice(0, 4).map(function (src, i) { return '<img src="' + esc(src) + '" alt="Crew photograph ' + (i + 1) + '">'; }).join('');
+
+    return '' +
+      '<article class="ho-page" aria-label="Patient handover sheet">' +
+        '<header class="ho-head">' +
+          '<div class="ho-brand"><span class="ho-mark" aria-hidden="true">+</span><div><b>GoldenHour</b><small>Pre-arrival handover</small></div></div>' +
+          '<div class="ho-hosp"><b>' + esc(h.name || 'Receiving hospital') + '</b><small>' + esc([h.district, h.state].filter(Boolean).join(', ')) + (h.phone ? ' · ' + esc(h.phone) : '') + '</small></div>' +
+        '</header>' +
+        '<section class="ho-prio ho-prio-' + esc(d.priority || 'GREEN') + '">' +
+          '<div><span class="ho-prio-tag">' + esc(pr[0]) + '</span><h1>' + esc(d.chief_complaint || 'Emergency') + '</h1><p>' + esc(pr[1]) + '</p></div>' +
+          '<dl><dt>Case</dt><dd class="ho-mono">' + esc(d.case_code) + '</dd><dt>Ambulance</dt><dd class="ho-mono">' + esc(d.ambulance_id || '—') + '</dd><dt>Status</dt><dd>' + esc(arrived ? 'Arrived ' + hoTime(d.arrived_at) : 'En route') + '</dd></dl>' +
+        '</section>' +
+        '<section class="ho-facts">' +
+          [['Age group', GH.ageBand(p.age)], ['Sex', GH.SEX[p.gender || 'U'] || 'Unknown'], ['Blood group', p.blood_group || 'Not known'], ['Consciousness', p.consciousness || 'Not recorded'], ['Distance at accept', d.distance_km != null ? d.distance_km.toFixed(1) + ' km' : '—']]
+            .map(function (f) { return '<div><span>' + esc(f[0]) + '</span><b>' + esc(f[1]) + '</b></div>'; }).join('') +
+        '</section>' +
+        (flags.length ? '<section class="ho-alerts"><h2>Red flags</h2>' + flags.map(function (k) { return '<div class="ho-alert"><b>⚠ ' + esc(FLAG_TEXT[k][0]) + '</b><span>' + esc(FLAG_TEXT[k][1]) + '</span></div>'; }).join('') + '</section>' : '') +
+        '<section class="ho-cols">' +
+          '<div class="ho-main">' +
+            '<h2>Vital signs</h2>' +
+            '<table class="ho-vitals"><thead><tr><th>Vital</th><th>At alert</th><th>Latest</th><th>Change</th><th>Status</th><th>Normal</th></tr></thead><tbody>' + (rows || '<tr><td colspan="6">No vitals recorded.</td></tr>') + '</tbody></table>' +
+            fast +
+            (changes ? '<h2>Updates from the crew on the way</h2><ul class="ho-changes">' + changes + '</ul>' : '') +
+            (d.notes ? '<h2>Crew note</h2><blockquote class="ho-note">' + esc(d.notes) + '</blockquote>' : '') +
+            (photos ? '<h2>Crew photographs</h2><div class="ho-photos">' + photos + '</div>' : '') +
+          '</div>' +
+          '<aside class="ho-side">' +
+            '<div class="ho-box"><h3>Have ready</h3>' + (needs.length ? '<ul class="ho-ready">' + needs.map(function (k) { return '<li><span class="ho-check" aria-hidden="true"></span>' + esc(NEED_TEXT[k]) + '</li>'; }).join('') + '</ul>' : '<p>No special resources flagged.</p>') + '</div>' +
+            '<div class="ho-box"><h3>Timeline</h3><ol class="ho-steps">' + steps.map(function (st) {
+              return '<li class="' + (st[1] ? 'is-done' : '') + '"><b>' + esc(st[0]) + '</b><span>' + esc(hoTime(st[1])) + (st[2] ? ' · ' + esc(st[2]) : '') + '</span></li>';
+            }).join('') + '</ol>' + (d.intervals && d.intervals.broadcast_to_arrival != null ? '<p class="ho-total">Alert to door: <b>' + esc(hoDur(d.intervals.broadcast_to_arrival)) + '</b></p>' : '') + '</div>' +
+          '</aside>' +
+        '</section>' +
+        '<section class="ho-sign">' +
+          '<div><span>Received by (name, role)</span><i></i></div><div><span>Signature</span><i></i></div><div><span>Time</span><i></i></div>' +
+          '<div><span>Handed over by (crew)</span><i></i></div><div><span>Signature</span><i></i></div><div><span>Ambulance</span><i>' + esc(d.ambulance_id || '') + '</i></div>' +
+        '</section>' +
+        '<footer class="ho-foot">Printed ' + esc(new Date().toLocaleString()) + ' · GoldenHour · Priority is decision support worked out from the vitals at the alert, not a diagnosis. Confirm every value at the bedside.</footer>' +
+      '</article>';
+  }
+
   function handover(code) {
     GH.api('/desk/handover/' + encodeURIComponent(code)).then(function (d) {
-      var p = d.patient || {};
-      var vit = (d.vitals_initial_vs_latest || []).map(function (v) { return '<tr><td>' + esc(v.key.replace(/_/g, ' ')) + '</td><td>' + esc(v.initial == null ? '—' : v.initial) + '</td><td>' + esc(v.latest == null ? '—' : v.latest) + '</td></tr>'; }).join('');
-      $('#handover').innerHTML =
-        '<h1 style="font-size:18pt;margin:0 0 4pt">Pre-arrival handover · ' + esc(d.case_code) + '</h1>' +
-        '<p>' + esc(d.hospital && d.hospital.name) + ' · priority ' + esc(d.priority) + ' · ' + esc(d.chief_complaint || '') + '</p>' +
-        '<p>Patient: ' + esc(GH.ageBand(p.age)) + ', ' + esc(GH.SEX[p.gender || 'U']) + (p.blood_group ? ', blood ' + esc(p.blood_group) : '') + (p.consciousness ? ', ' + esc(p.consciousness) : '') + '</p>' +
-        '<p>Broadcast ' + esc(GH.timeOf(d.created_at)) + ' · accepted ' + esc(GH.timeOf(d.accepted_at)) + ' · arrived ' + esc(GH.timeOf(d.arrived_at)) + '</p>' +
-        '<table style="border-collapse:collapse;margin:8pt 0" border="1" cellpadding="4"><tr><th>Vital</th><th>At broadcast</th><th>Latest</th></tr>' + vit + '</table>' +
-        (d.notes ? '<p><b>Crew note:</b> ' + esc(d.notes) + '</p>' : '') +
-        '<p style="font-size:9pt;margin-top:16pt">GoldenHour · printed ' + esc(new Date().toLocaleString()) + '</p>';
-      setTimeout(function () { window.print(); }, 150);
+      var box = $('#handover');
+      box.innerHTML = '<div class="ho-bar" role="toolbar" aria-label="Handover sheet"><b>Handover sheet · ' + esc(d.case_code) + '</b>' +
+        '<button type="button" class="g-btn g-btn-act" data-ho="print">Print</button><button type="button" class="g-btn" data-ho="close">Close</button></div>' +
+        handoverHtml(d);
+      box.classList.add('is-open');
+      box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Handover sheet for ' + d.case_code);
+      var opener = document.activeElement;
+      function close() { box.classList.remove('is-open'); box.innerHTML = ''; document.removeEventListener('keydown', onKey); if (opener && opener.focus) opener.focus(); }
+      function onKey(e) { if (e.key === 'Escape') close(); }
+      document.addEventListener('keydown', onKey);
+      $('[data-ho="close"]', box).addEventListener('click', close);
+      $('[data-ho="print"]', box).addEventListener('click', function () { window.print(); });
+      $('[data-ho="print"]', box).focus();
+      if (cfg.PRINT_ON_ARRIVE && d.arrived_at && state.arrivedSeen[code]) setTimeout(function () { window.print(); }, 300);
     }).catch(function (e) { GH.toast('Handover unavailable — ' + e.message); });
   }
 
