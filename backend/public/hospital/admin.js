@@ -244,6 +244,7 @@
         var now = c.status === 'ACCEPTED' ? (c.position ? GH.km(c.remaining_distance_km) + ' away' + (liveEta(c) ? ' · ' + liveEta(c) : '') + ' · GPS ' + GH.secondsAgo(c.position.at) : 'no GPS from the crew yet') : '';
         return '<tr><td><span class="mono">' + esc(c.case_code) + '</span><div class="sub">' + esc(c.chief_complaint || '') + '</div></td><td>' + esc(c.status) + '</td><td>' + esc(c.priority) + '</td><td>' + c.hospitals_notified + '</td><td>' + esc(c.accepted_by || '—') + (now ? '<div class="sub">' + esc(now) + '</div>' : '') + '</td><td>' + esc(GH.dateTime(c.created_at)) + '</td></tr>';
       }).join('') || '<tr><td colspan="6" class="table-empty">No cases yet.</td></tr>';
+      paintLiveKpis(b.cases || []);
       paintLiveMap(b);
     }).catch(function (e) { $('#liveRows').innerHTML = '<tr><td colspan="6" class="table-empty">' + esc(e.message) + '</td></tr>'; });
   }
@@ -319,9 +320,37 @@
     }).catch(function (e) { $('#auditRows').innerHTML = '<tr><td colspan="3" class="table-empty">' + esc(e.message) + '</td></tr>'; });
   }
 
+  /* ── the network at a glance ────────────────────────────────────────── */
+  function countTo(el, value) {
+    if (!el) return;
+    var to = Number(value) || 0, from = Number(el.dataset.v || 0);
+    el.dataset.v = to;
+    if (from === to && el.textContent !== '—') return;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || !window.requestAnimationFrame) { el.textContent = to.toLocaleString('en-IN'); return; }
+    var t0 = null, dur = 700;
+    (function step(t) {
+      if (t0 === null) t0 = t;
+      var k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = Math.round(from + (to - from) * e).toLocaleString('en-IN');
+      if (k < 1) window.requestAnimationFrame(step);
+    })(performance.now());
+  }
+  function kpi(name, value) { countTo($('[data-kpi="' + name + '"]'), value); }
+  function paintLiveKpis(cases) {
+    var enRoute = cases.filter(function (c) { return c.status === 'ACCEPTED'; }).length;
+    var waiting = cases.filter(function (c) { return c.status === 'PENDING'; }).length;
+    kpi('enroute', enRoute); kpi('waiting', waiting);
+    var hot = $('.kpi-hot'); if (hot) hot.classList.toggle('is-live', enRoute > 0);
+  }
+  function loadKpis() {
+    GH.api('/admin/live').then(function (b) { paintLiveKpis(b.cases || []); }).catch(function () {});
+  }
+
   function loadCoverage() {
     GH.api('/admin/directory/summary').then(function (b) {
       var s = b.summary || {}, n = function (x) { return Number(x || 0).toLocaleString('en-IN'); };
+      kpi('hospitals', s.active); kpi('logins', s.hospitals_with_login);
       $('#coverage').innerHTML =
         '<div class="kv"><span>Hospitals on GoldenHour</span><b>' + n(s.records) + '</b></div>' +
         '<div class="kv"><span>…switched on</span><b>' + n(s.active) + '</b></div>' +
@@ -407,7 +436,8 @@
     bindOnce();
     syncMode();
     $('#adminName').textContent = account.username;
-    loadStates(); loadCoverage(); showTab('accounts');
+    loadStates(); loadCoverage(); loadKpis(); showTab('accounts');
+    timers.push(setInterval(function () { loadKpis(); loadCoverage(); }, 15000));
     timers.push(setInterval(function () { if (!$('[data-pane="live"]').hidden) loadLive(); }, 10000));
   }
   function stop() {
