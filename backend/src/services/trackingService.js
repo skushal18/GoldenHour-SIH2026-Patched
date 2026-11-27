@@ -45,11 +45,11 @@ function append(caseCode, hospitalLat, hospitalLng, pos){
   if (!Number.isFinite(at) || at > now + 30000 || now - at > 120000) return { error: 'STALE_POSITION' };
   if (pos.accuracy_m != null && (!Number.isFinite(Number(pos.accuracy_m)) || Number(pos.accuracy_m) < 0 || Number(pos.accuracy_m) > MAX_ACCURACY_M)) return { error: 'INACCURATE_POSITION' };
   const rec = ensure(caseCode);
+  if (rec.lastUpdateMs && (now - rec.lastUpdateMs) < MIN_INTERVAL_MS) return { throttled: true };
   /* The same fix sent twice (socket, then the HTTP fallback after a lost
      acknowledgement) is not an error: it is already recorded. */
   if (rec.last_position && at === Date.parse(rec.last_position.at) &&
       Number(pos.lat) === rec.last_position.lat && Number(pos.lng) === rec.last_position.lng) return { duplicate: true, record: rec, point: rec.last_position };
-  if (rec.lastUpdateMs && (now - rec.lastUpdateMs) < MIN_INTERVAL_MS) return { throttled: true };
   if (rec.last_position && at <= Date.parse(rec.last_position.at)) return { error: 'OUT_OF_ORDER' };
   const accuracy = pos.accuracy_m == null ? null : Number(pos.accuracy_m);
   const point = {
