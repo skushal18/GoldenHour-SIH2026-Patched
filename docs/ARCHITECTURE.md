@@ -2,6 +2,8 @@
 
 How the two repositories were merged, what was added, and where the seams are.
 
+> **v7 status — read this first.** Every hospital now signs in (`DESK_AUTH=jwt` is the default and production refuses anything else); a desk's hospital comes from its login, never from its IP. The IP / `?hospital=` identity and the "two laptops" described below survive only as an opt-in LAN rehearsal mode (`DESK_AUTH=ip`). Hospitals live in the MySQL `hospitals` table (`backend/src/services/directoryService.js`); accounts use one-time activation codes; the stack runs on AWS (S3 + CloudFront, Elastic Beanstalk, RDS). The live map (desk location as the hospital end, crew GPS over socket or `POST /requests/:code/position`, live ETA statement, admin network map) is described in `README.md` → *Live map*. Where this file disagrees with `README.md`, the README is right.
+
 ---
 
 ## Where the pieces came from
@@ -217,9 +219,9 @@ wrong city.
 
 ## Two security postures
 
-`DESK_AUTH` picks which, and the startup banner says which is live.
+`DESK_AUTH` picks which (default `jwt`), and the startup banner says which is live.
 
-| | `ip` (default) | `jwt` |
+| | `ip` (LAN rehearsal only) | `jwt` (default; required in production) |
 |---|---|---|
 | Who is this board? | its IP, matched against `config/hospitals.config.js` | `hospital_id` inside a signed token |
 | `?hospital=2` | changes identity (that is the point) | ignored |
@@ -234,7 +236,7 @@ every incoming case anyway — the same patient data, through a side door. So
 `join_hospital` event (a free pass into any room, written for the LAN-trust
 world) is disabled there too.
 
-Identity resolution is shared: `services/hospitalDirectory.js` answers "who is
+Identity resolution is shared: `services/directoryService.js` answers "who is
 hospital #N?" from the config during the demo and from the `hospitals` table
 afterwards, so nothing downstream has to know which world it is in.
 
@@ -271,5 +273,5 @@ by `prefers-color-scheme`, so a laptop or phone on a night theme keeps the same
 | `app/tests/location.test.js` (21) | GPS refused → the panel appears with the right shortcuts, one tap unblocks the broadcast, typed coordinates are validated, a stale fix is not offered, and `origin.source` reaches the payload honestly |
 | `backend/tests/broadcast.e2e.test.js` (40) | the real server — both laptops alerted, the simultaneous-accept race, the 409 with the winner's name, the ambulance status flip, decline, cancel, expiry, a hand-set position reaching the board flagged, and junk coordinates refused (including `null`, which `Number()` would have turned into a valid 0°,0°) |
 | `app/tests/config.test.js` (12) | server resolution in all four contexts — the APK must fall back to demo rather than guessing its own `https://localhost` origin — plus the APK plumbing: vendored Socket.IO client, cleartext traffic in the manifest, `config.js` loaded before `app.js` |
-| `backend/tests/desk-auth.test.js` (17) | `DESK_AUTH=jwt` — anonymous, forged, expired and wrong-role tokens all refused; identity taken from the token so `?hospital=2` cannot forge it; the race still resolves to one winner; and an unauthenticated desk *socket* is disconnected rather than quietly streaming patient data over a channel HTTP would have blocked |
+| `backend/tests/auth.test.js`, `activation.test.js`, `security.test.js` | `DESK_AUTH=jwt` — anonymous, forged, expired and wrong-role tokens all refused; identity taken from the token so `?hospital=2` cannot forge it; the race still resolves to one winner; and an unauthenticated desk *socket* is disconnected rather than quietly streaming patient data over a channel HTTP would have blocked |
 | `backend/tests/ui.check.js` | a Playwright walk-through of the actual two-board demo. Not part of `npm test` — it needs `npm i -D playwright` — but it is what proves the browser story end to end |
