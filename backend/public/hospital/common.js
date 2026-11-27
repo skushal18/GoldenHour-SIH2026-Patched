@@ -157,12 +157,61 @@
     $('#lightbox').hidden = true;
   });
 
+  /* ── maps (Leaflet) ──────────────────────────────────────────────────────
+     Every map on the desk and the admin console is made here, so the tile
+     source, its referrer policy and the marker styles live in one place. */
+  var cfg = window.GH_DESK_CONFIG || {};
+  function mapsAvailable() { return !!(window.L && cfg.MAP_TILE_URL); }
+  function newMap(el, options) {
+    var o = options || {};
+    var map = L.map(el, { zoomControl: true, attributionControl: true, scrollWheelZoom: !!o.scrollWheelZoom });
+    L.tileLayer(cfg.MAP_TILE_URL, {
+      maxZoom: 19, attribution: cfg.MAP_ATTRIBUTION || '',
+      referrerPolicy: cfg.MAP_TILE_REFERRER_POLICY || 'strict-origin-when-cross-origin',
+    }).addTo(map);
+    map.setView(o.center || [12.9716, 77.5946], o.zoom || 13);
+    setTimeout(function () { try { map.invalidateSize(); } catch (_) {} }, 60);
+    return map;
+  }
+  function divIcon(html, size) {
+    return L.divIcon({ className: 'gh-pin', html: html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+  }
+  var ICONS = {
+    ambulance: function (priority, rough) {
+      return divIcon('<div class="amb-marker amb-' + esc(priority || 'NONE') + (rough ? ' is-rough' : '') + '" aria-hidden="true"></div>', 22);
+    },
+    hospital: function (fromDesk) { return divIcon('<div class="hosp-marker' + (fromDesk ? ' is-desk' : '') + '" aria-hidden="true">+</div>', 26); },
+    origin: function () { return divIcon('<div class="origin-marker" aria-hidden="true"></div>', 16); },
+    network: function () { return divIcon('<div class="net-marker" aria-hidden="true"></div>', 10); },
+  };
+  /* Great-circle distance in km, or null when either end is unknown. */
+  function distanceKm(a, b) {
+    if (!a || !b || a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
+    var R = 6371, r = Math.PI / 180;
+    var dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  }
+  function km(n) {
+    if (n == null || !isFinite(n)) return '—';
+    return n < 1 ? Math.round(n * 1000 / 10) * 10 + ' m' : n.toFixed(1) + ' km';
+  }
+  function secondsAgo(iso) {
+    var s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (!isFinite(s)) return '';
+    if (s < 5) return 'just now';
+    if (s < 90) return s + ' s ago';
+    return Math.round(s / 60) + ' min ago';
+  }
+
   window.GH = {
     $: $, $$: $$, esc: esc, api: api,
     session: getSession, saveSession: saveSession,
     onSignedOut: function (fn) { onSignedOut = fn; },
     timeOf: timeOf, dateTime: dateTime, ago: ago, secs: secs, ageBand: ageBand, SEX: SEX, initials: initials,
     toast: toast, openSheet: openSheet, closeSheet: closeSheet,
-    cfg: window.GH_DESK_CONFIG || {},
+    cfg: cfg,
+    maps: { available: mapsAvailable, create: newMap, icons: ICONS },
+    distanceKm: distanceKm, km: km, secondsAgo: secondsAgo,
   };
 })();

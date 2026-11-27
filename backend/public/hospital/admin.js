@@ -233,12 +233,76 @@
   }
 
   /* ── live + audit ────────────────────────────────────────────────────── */
+  function liveEta(c) {
+    if (c.live_eta_minutes != null) return 'about ' + c.live_eta_minutes + ' min';
+    if (c.est_eta_minutes != null) return 'about ' + c.est_eta_minutes + ' min (estimate)';
+    return '';
+  }
   function loadLive() {
     GH.api('/admin/live').then(function (b) {
       $('#liveRows').innerHTML = (b.cases || []).map(function (c) {
-        return '<tr><td><span class="mono">' + esc(c.case_code) + '</span><div class="sub">' + esc(c.chief_complaint || '') + '</div></td><td>' + esc(c.status) + '</td><td>' + esc(c.priority) + '</td><td>' + c.hospitals_notified + '</td><td>' + esc(c.accepted_by || '—') + '</td><td>' + esc(GH.dateTime(c.created_at)) + '</td></tr>';
+        var now = c.status === 'ACCEPTED' ? (c.position ? GH.km(c.remaining_distance_km) + ' away' + (liveEta(c) ? ' · ' + liveEta(c) : '') + ' · GPS ' + GH.secondsAgo(c.position.at) : 'no GPS from the crew yet') : '';
+        return '<tr><td><span class="mono">' + esc(c.case_code) + '</span><div class="sub">' + esc(c.chief_complaint || '') + '</div></td><td>' + esc(c.status) + '</td><td>' + esc(c.priority) + '</td><td>' + c.hospitals_notified + '</td><td>' + esc(c.accepted_by || '—') + (now ? '<div class="sub">' + esc(now) + '</div>' : '') + '</td><td>' + esc(GH.dateTime(c.created_at)) + '</td></tr>';
       }).join('') || '<tr><td colspan="6" class="table-empty">No cases yet.</td></tr>';
+      paintLiveMap(b);
     }).catch(function (e) { $('#liveRows').innerHTML = '<tr><td colspan="6" class="table-empty">' + esc(e.message) + '</td></tr>'; });
+  }
+
+  /* ── network map ─────────────────────────────────────────────────────────
+     Accepted ambulances where their GPS last put them (or where they sent the
+     case from, until the first fix), a dashed line to the hospital end they
+     are heading for, the points open cases were sent from, and every
+     hospital that can receive a case. Refreshed with the table. */
+  var live = { map: null, layer: null, fitted: false, userAt: 0 };
+  function paintLiveMap(b) {
+    var box = $('#liveMap'); if (!box) return;
+    var cases = (b.cases || []).filter(function (c) { return c.status === 'ACCEPTED' || c.status === 'PENDING'; });
+    var enRoute = cases.filter(function (c) { return c.status === 'ACCEPTED'; }).length;
+    var waiting = cases.length - enRoute;
+    $('#liveSummary').textContent = enRoute + ' en route · ' + waiting + ' waiting for a hospital · ' + (b.hospitals || []).length + ' hospitals receiving';
+    if (!GH.maps.available()) { box.innerHTML = '<p class="map-readout" style="padding:16px">The map is unavailable here — the table below has every case.</p>'; return; }
+    if (!live.map) {
+      live.map = GH.maps.create(box, { zoom: 11, scrollWheelZoom: true });
+      live.layer = L.layerGroup().addTo(live.map);
+      live.map.on('dragstart', function () { live.userAt = Date.now(); });
+    } else live.map.invalidateSize();
+    live.layer.clearLayers();
+    var focus = [], all = [];
+    (b.hospitals || []).forEach(function (h) {
+      L.marker([h.lat, h.lng], { icon: GH.maps.icons.network(), keyboard: false })
+        .bindTooltip(h.name + (h.source === 'desk' ? ' · desk location' : ' · directory address')).addTo(live.layer);
+      all.push([h.lat, h.lng]);
+    });
+    cases.forEach(function (c) {
+      if (c.status === 'PENDING') {
+        if (!c.origin) return;
+        L.marker([c.origin.lat, c.origin.lng], { icon: GH.maps.icons.origin(), keyboard: false, zIndexOffset: 300 })
+          .bindTooltip(c.case_code + ' · ' + (c.chief_complaint || 'Emergency') + ' · waiting for a hospital · sent ' + GH.timeOf(c.created_at)).addTo(live.layer);
+        focus.push([c.origin.lat, c.origin.lng]);
+        return;
+      }
+      var pos = c.position || c.origin, dest = c.destination;
+      if (pos) {
+        var label = c.case_code + ' → ' + (dest ? dest.name : (c.accepted_by || 'hospital')) + (c.position ? ' · ' + GH.km(c.remaining_distance_km) + (liveEta(c) ? ' · ' + liveEta(c) : '') + ' · GPS ' + GH.secondsAgo(c.position.at) : ' · no GPS yet (shown where the case was sent from)');
+        L.marker([pos.lat, pos.lng], { icon: GH.maps.icons.ambulance(c.priority, !c.position || c.position.approximate), keyboard: false, zIndexOffset: 500 })
+          .bindTooltip(label).addTo(live.layer);
+        focus.push([pos.lat, pos.lng]);
+      }
+      if (dest) {
+        L.marker([dest.lat, dest.lng], { icon: GH.maps.icons.hospital(dest.source === 'desk'), keyboard: false, zIndexOffset: 400 })
+          .bindTooltip(dest.name + (dest.source === 'desk' ? ' · desk location' : ' · directory address')).addTo(live.layer);
+        focus.push([dest.lat, dest.lng]);
+        if (pos) L.polyline([[pos.lat, pos.lng], [dest.lat, dest.lng]], { color: '#AE570F', weight: 2, opacity: .75, dashArray: '6 6', interactive: false }).addTo(live.layer);
+      }
+    });
+    /* Frame the open cases (or, with none, the network) the first time and
+       whenever the view has been left alone for a minute. */
+    var frame = focus.length ? focus : all;
+    if (frame.length && (!live.fitted || Date.now() - live.userAt > 60000)) {
+      if (frame.length === 1) live.map.setView(frame[0], 14);
+      else live.map.fitBounds(L.latLngBounds(frame).pad(0.2), { maxZoom: 15 });
+      live.fitted = true;
+    }
   }
   function loadAudit() {
     var words = { SIGNED_IN: 'Signed in', SIGN_IN_FAILED: 'Sign-in failed', PASSWORD_CHANGED: 'Password changed', ACCOUNT_CREATED: 'Login created',
@@ -344,9 +408,12 @@
     syncMode();
     $('#adminName').textContent = account.username;
     loadStates(); loadCoverage(); showTab('accounts');
-    timers.push(setInterval(function () { if (!$('[data-pane="live"]').hidden) loadLive(); }, 15000));
+    timers.push(setInterval(function () { if (!$('[data-pane="live"]').hidden) loadLive(); }, 10000));
   }
-  function stop() { timers.forEach(clearInterval); timers = []; me = null; }
+  function stop() {
+    timers.forEach(clearInterval); timers = []; me = null;
+    if (live.map) { try { live.map.remove(); } catch (_) {} live.map = null; live.layer = null; live.fitted = false; }
+  }
 
   window.GHAdmin = { start: start, stop: stop };
 })();

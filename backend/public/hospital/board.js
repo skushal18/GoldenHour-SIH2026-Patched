@@ -20,6 +20,10 @@
       account: account, hospital: hospital, socket: null, timers: [],
       pending: {}, active: {}, order: { pending: [], active: [] },
       els: {}, maps: {}, delays: {}, arrivals: {}, arrivedSeen: {},
+      /* The hospital end of every map and ETA (server's answer to this desk's
+         reported location), the last fix this screen sent, and which cases
+         have already been announced as arriving. */
+      here: null, sentFix: null, geoWatch: null, geoError: null, near: {},
       capacity: { resus_bays_available: 0, ventilators_available: 0, ct_available: true, ot_available: true, blood_available: true, cathlab_available: true, diversion_active: false, updated_at: null },
       sound: cfg.ENABLE_SOUND !== false, audio: null, started: false,
     };
@@ -157,6 +161,7 @@
         '<div class="titles"><h3>' + esc(card.chief_complaint || 'Emergency') + '</h3><span class="sub">' + subline(card) + '</span></div>' +
         '<div class="eta"><b>' + esc(eta) + '</b><span>' + esc(dist) + (dist ? ' · ' : '') + '<span class="countdown" data-expires="' + esc(card.expires_at || '') + '">' + esc(countdown(card.expires_at)) + '</span></span></div>' +
       '</div>' +
+      sentFromHtml(card) +
       vitalsHtml(card.patient) + flagsHtml(card) + needsHtml(card) + shotsHtml(card) +
       (card.notes ? '<p class="note-block"><b>Crew note:</b> ' + esc(card.notes) + '</p>' : '') +
       '<div class="actions">' +
@@ -174,13 +179,80 @@
     var age = valid ? Date.now() - Date.parse(p.at) : Infinity;
     var stale = valid && (!isFinite(age) || age > 30000);
     var src = stale ? 'stale' : (card.eta_source || 'crew');
-    var live = valid && !stale && src === 'live' && card.live_eta_minutes != null;
+    var e = etaChoice(card, valid && !stale);
     return {
       valid: valid, stale: stale, age: age,
-      eta: live ? card.live_eta_minutes + ' min' : (card.eta_minutes != null ? card.eta_minutes + ' min' : '—'),
-      etaNote: live ? 'Live GPS' : (src === 'stalled' ? 'Not moving' : src === 'stationary' ? 'Slow / stopped' : src === 'stale' ? 'Location stale' : (card.eta_minutes != null ? 'Crew estimate' : 'ETA unavailable')),
-      etaCls: live ? 'live' : (src === 'stale' || src === 'stalled' ? 'stale' : ''),
+      eta: e ? e.min + ' min' : '—',
+      etaNote: src === 'stalled' ? 'Not moving' : src === 'stationary' ? 'Slow / stopped' : src === 'stale' ? 'Location stale' : (e ? e.note : 'ETA unavailable'),
+      etaCls: e && e.live && !stale ? 'live' : (src === 'stale' || src === 'stalled' ? 'stale' : ''),
     };
+  }
+
+  /* ── live statement ──────────────────────────────────────────────────────
+     One sentence per en-route case that says what the desk needs to know
+     right now — where the ambulance is, when it will be here, and whether
+     to get ready — re-worded every second as fixes arrive and age. */
+  function etaChoice(card, fresh) {
+    if (fresh && card.eta_source === 'live' && card.live_eta_minutes != null) return { min: card.live_eta_minutes, label: 'live GPS', note: 'Live GPS', live: true };
+    if (card.last_position && card.est_eta_minutes != null) return { min: card.est_eta_minutes, label: 'estimate at city speed', note: 'Estimate · city speed' };
+    if (card.eta_minutes != null) {
+      var since = (Date.now() - Date.parse(card.created_at)) / 60000;
+      var left = Math.max(1, Math.round(card.eta_minutes - (isFinite(since) ? since : 0)));
+      return { min: left, label: 'crew’s estimate', note: 'Crew estimate' };
+    }
+    return null;
+  }
+  function duration(ms) {
+    var s = Math.round(ms / 1000);
+    return s < 90 ? s + ' s' : Math.round(s / 60) + ' min';
+  }
+  function statement(card) {
+    var p = card.last_position, here = hospitalPoint(card);
+    var valid = p && p.lat != null && p.lng != null;
+    var age = valid ? Date.now() - Date.parse(p.at) : Infinity;
+    var fresh = valid && age <= 30000;
+    var dist = valid ? (card.remaining_distance_km != null ? card.remaining_distance_km : GH.distanceKm(p, here)) : null;
+    var e = etaChoice(card, fresh);
+    var etaText = e ? 'about ' + e.min + ' min' : 'ETA not known yet';
+    var rough = valid && p.approximate && p.accuracy_m != null ? ' Position approximate (±' + GH.km(p.accuracy_m / 1000) + ').' : '';
+    if (!valid) {
+      var from = GH.distanceKm(card.origin, here);
+      var waited = Date.now() - Date.parse(card.accepted_at || card.created_at);
+      return { tone: 'wait', near: false, text: 'Waiting for the ambulance’s GPS.' +
+        (from != null ? ' The case was sent from ' + GH.km(from) + ' away' + (e ? ' — ' + etaText + ' (' + e.label + ')' : '') + '.' : '') +
+        (isFinite(waited) && waited > 60000 ? ' Nothing for ' + duration(waited) + ': the crew’s phone may have location off, or the app closed.' : '') };
+    }
+    if (!fresh) return { tone: 'warn', near: false, text: 'No location update for ' + duration(age) + '. Last seen ' + GH.km(dist) + ' away.' + rough };
+    if (dist != null && dist <= 0.15) return { tone: 'here', near: true, text: 'At your door — the ambulance is under 150 m away.' };
+    var nearMin = Number(cfg.ARRIVING_MINUTES) || 3, nearKm = Number(cfg.ARRIVING_KM) || 1;
+    if ((e && e.min <= nearMin) || (dist != null && dist <= nearKm)) {
+      return { tone: 'near', near: true, text: 'Arriving in ' + etaText + ' — ' + GH.km(dist) + ' away. Get ready to receive.' + rough };
+    }
+    if (card.eta_source === 'stalled') return { tone: 'warn', near: false, text: 'Not moving for over a minute — ' + GH.km(dist) + ' away, ' + etaText + ' once moving.' + rough };
+    var speed = card.moving_kmh != null && card.moving_kmh >= 5 ? ' · ' + card.moving_kmh + ' km/h' : '';
+    var lead = card.eta_source === 'stationary' ? 'Stopped or crawling · ' : '';
+    return { tone: 'live', near: false, text: lead + GH.km(dist) + ' away · ' + etaText + (e ? ' (' + e.label + ')' : '') + speed + ' · updated ' + GH.secondsAgo(p.at) + '.' + rough };
+  }
+  function statementHtml(card) {
+    var st = statement(card);
+    return '<div class="live-line tone-' + st.tone + '" data-live="' + esc(card.case_code) + '" role="status"><span class="dot" aria-hidden="true"></span><span class="txt">' + esc(st.text) + '</span></div>';
+  }
+  /* Announce an arriving ambulance once: banner on the card, chime, toast. */
+  function checkNear(card, st) {
+    var el = state.els[card.case_code];
+    if (el) el.classList.toggle('is-arriving', !!st.near && card.status !== 'ARRIVED');
+    if (!st.near || state.near[card.case_code] || card.status === 'ARRIVED') return;
+    state.near[card.case_code] = true;
+    chime();
+    GH.toast(card.case_code + ': ' + st.text, 8000);
+  }
+  function sentFromHtml(card) {
+    var here = hospitalPoint(card);
+    var km = GH.distanceKm(card.origin, here);
+    if (km == null) return '';
+    var o = card.origin || {};
+    var how = o.source && o.source !== 'gps' ? 'position ' + (o.source === 'manual' ? 'set by hand' : o.source) : (o.accuracy_m != null ? 'GPS ±' + Math.round(o.accuracy_m) + ' m' : 'GPS');
+    return '<div class="live-line tone-wait"><span class="dot" aria-hidden="true"></span><span class="txt">Sent from ' + esc(GH.km(km)) + ' away (' + esc(how) + '), ' + esc(GH.ago(card.created_at)) + '.</span></div>';
   }
 
   function lastUpdateLine(card) {
@@ -208,18 +280,20 @@
   function activeBody(card) {
     var arrived = card.status === 'ARRIVED';
     var t = trackView(card);
-    var dist = card.remaining_distance_km != null ? card.remaining_distance_km.toFixed(1) + ' km' : (card.distance_km != null ? card.distance_km.toFixed(1) + ' km' : '—');
-    var fix = t.valid ? Math.max(0, Math.round(t.age / 1000)) + ' s' : '—';
-    var acc = card.last_position && card.last_position.accuracy_m != null ? '±' + Math.round(card.last_position.accuracy_m) + ' m' : 'no fix yet';
+    var dist = card.remaining_distance_km != null ? GH.km(card.remaining_distance_km) : (card.distance_km != null ? GH.km(card.distance_km) : '—');
+    var fix = t.valid ? duration(Math.max(0, t.age)) : '—';
+    var acc = card.last_position && card.last_position.accuracy_m != null ? '±' + GH.km(card.last_position.accuracy_m / 1000) + (card.last_position.approximate ? ' · approximate' : '') : 'no fix yet';
+    var end = hospitalPoint(card);
+    var distNote = end && end.source === 'desk' ? 'straight line to this screen' : 'straight line to hospital address';
     return '' +
       '<div class="case-top">' + prioPill(card.priority) +
         '<div class="titles"><h3>' + esc(card.chief_complaint || 'Emergency') + '</h3><span class="sub">' + subline(card, 'accepted ' + esc(GH.timeOf(card.accepted_at))) + '</span></div>' +
       '</div>' +
-      (arrived ? '<span class="arrived-ribbon">✓ Arrived at ' + esc(GH.timeOf(card.arrived_at)) + ' — case closed</span>' : delayHtml(card.case_code)) +
+      (arrived ? '<span class="arrived-ribbon">✓ Arrived at ' + esc(GH.timeOf(card.arrived_at)) + ' — case closed</span>' : statementHtml(card) + delayHtml(card.case_code)) +
       (arrived ? '' : '<div class="stats">' +
         '<div class="stat"><span class="k">ETA</span><span class="v">' + esc(t.eta) + '</span><span class="s ' + t.etaCls + '">' + esc(t.etaNote) + '</span></div>' +
-        '<div class="stat"><span class="k">Distance</span><span class="v">' + esc(dist) + '</span><span class="s">straight line</span></div>' +
-        '<div class="stat"><span class="k">Last fix</span><span class="v">' + esc(fix) + '</span><span class="s">' + esc(acc) + '</span></div>' +
+        '<div class="stat"><span class="k">Distance</span><span class="v">' + esc(dist) + '</span><span class="s">' + esc(distNote) + '</span></div>' +
+        '<div class="stat stat-fix"><span class="k">Last fix</span><span class="v">' + esc(fix) + '</span><span class="s">' + esc(acc) + '</span></div>' +
       '</div>') +
       lastUpdateLine(card) + vitalsHtml(card.patient) + flagsHtml(card) + shotsHtml(card) +
       (card.notes ? '<p class="note-block"><b>Crew note:</b> ' + esc(card.notes) + '</p>' : '') +
@@ -237,12 +311,10 @@
     if (!el) {
       el = document.createElement('article');
       el.dataset.case = code; el.dataset.kind = kind;
-      if (kind === 'active') {
-        el.className = 'case case-active glass';
-        el.innerHTML = '<div class="body"></div><div class="mapbox"><div class="map"></div><div class="map-fallback" hidden></div><span class="map-tag" hidden></span></div>';
-      } else {
-        el.className = 'case glass';
-      }
+      /* Both kinds carry a map beside the details. The map lives outside
+         .body, which is re-rendered on every change, so it survives repaints. */
+      el.className = 'case case-split glass' + (kind === 'active' ? ' case-active' : ' case-pending');
+      el.innerHTML = '<div class="body"></div><div class="mapbox"><div class="map"></div><div class="map-fallback" hidden></div><span class="map-tag" hidden></span></div>';
       state.els[code] = el;
     }
     return el;
@@ -257,13 +329,14 @@
 
     var keep = {};
     var pl = $('#pendingList'), al = $('#activeList');
-    pend.forEach(function (c) { var el = ensureEl(c, 'pending'); el.innerHTML = pendingBody(c); pl.appendChild(el); keep[c.case_code] = 1; });
+    pend.forEach(function (c) { var el = ensureEl(c, 'pending'); $('.body', el).innerHTML = pendingBody(c); pl.appendChild(el); keep[c.case_code] = 1; updateMap(c, 'pending'); });
     act.forEach(function (c) {
       var el = ensureEl(c, 'active');
       el.classList.toggle('case-arrived', c.status === 'ARRIVED');
       $('.body', el).innerHTML = activeBody(c);
       al.appendChild(el); keep[c.case_code] = 1;
-      updateMap(c);
+      updateMap(c, 'active');
+      if (c.status !== 'ARRIVED') checkNear(c, statement(c));
     });
     Object.keys(state.els).forEach(function (code) {
       if (!keep[code]) { destroyMap(code); state.els[code].remove(); delete state.els[code]; }
@@ -282,10 +355,20 @@
     e.textContent = text;
   }
 
-  /* ── map ─────────────────────────────────────────────────────────────── */
+  /* ── map ─────────────────────────────────────────────────────────────────
+     The hospital end is this desk's own reported location (state.here, or
+     the server's tracking_hospital for the case), falling back to the
+     directory address. The ambulance end is the crew phone's GPS; before the
+     first fix, the point the case was sent from. */
   function hospitalPoint(card) {
-    var h = card.tracking_hospital || state.hospital;
-    return h && h.lat != null && h.lng != null ? [Number(h.lat), Number(h.lng)] : null;
+    var h = (card && card.tracking_hospital) || state.here;
+    if (h && h.lat != null && h.lng != null) return { lat: Number(h.lat), lng: Number(h.lng), source: h.source || 'directory', accuracy_m: h.accuracy_m };
+    var d = state.hospital;
+    return d && d.lat != null && d.lng != null ? { lat: Number(d.lat), lng: Number(d.lng), source: 'directory' } : null;
+  }
+  function originPoint(card) {
+    var o = card.origin;
+    return o && o.lat != null && o.lng != null ? [Number(o.lat), Number(o.lng)] : null;
   }
   function trackPoints(card) {
     var pts = (card.track || []).filter(function (p) { return p && p.lat != null && p.lng != null; }).map(function (p) { return [Number(p.lat), Number(p.lng)]; });
@@ -293,47 +376,84 @@
     if (lp && lp.lat != null && (!pts.length || pts[pts.length - 1][0] !== Number(lp.lat) || pts[pts.length - 1][1] !== Number(lp.lng))) pts.push([Number(lp.lat), Number(lp.lng)]);
     return pts.slice(-120);
   }
-  function updateMap(card) {
+  function hospitalLabel(h) {
+    var name = state.hospital ? state.hospital.name : 'Hospital';
+    return h && h.source === 'desk' ? name + ' — this screen' + (h.accuracy_m != null ? ' (±' + GH.km(h.accuracy_m / 1000) + ')' : '') : name + ' — directory address';
+  }
+  function updateMap(card, kind) {
     var el = state.els[card.case_code]; if (!el) return;
     var box = $('.mapbox', el), mapEl = $('.map', box), fb = $('.map-fallback', box), tag = $('.map-tag', box);
-    var pts = trackPoints(card), hp = hospitalPoint(card);
-    var useLeaflet = window.L && cfg.MAP_TILE_URL && card.status !== 'ARRIVED';
+    var pts = kind === 'active' ? trackPoints(card) : [];
+    var hp = hospitalPoint(card), hpLL = hp ? [hp.lat, hp.lng] : null, org = originPoint(card);
     if (card.status === 'ARRIVED') {
       destroyMap(card.case_code);
       mapEl.hidden = true; fb.hidden = false; tag.hidden = true;
       fb.innerHTML = '<span class="map-readout">Arrival confirmed · location sharing has ended.</span>';
       return;
     }
-    if (!useLeaflet) {
+    var last = pts.length ? pts[pts.length - 1] : null;
+    var amb = last || org;                              // where the ambulance is (or was)
+    if (!GH.maps.available()) {
       mapEl.hidden = true; fb.hidden = false;
-      fb.innerHTML = trailSvg(pts, hp);
+      fb.innerHTML = trailSvg(pts.length ? pts : (org ? [org] : []), hpLL);
       tag.hidden = false; tag.textContent = 'GPS trail · not a road map';
       return;
     }
     mapEl.hidden = false; fb.hidden = true;
     var m = state.maps[card.case_code];
     if (!m) {
-      var map = L.map(mapEl, { zoomControl: true, attributionControl: true, scrollWheelZoom: false });
-      L.tileLayer(cfg.MAP_TILE_URL, { maxZoom: 19, attribution: cfg.MAP_ATTRIBUTION || '' }).addTo(map);
-      m = state.maps[card.case_code] = { map: map, trail: L.polyline([], { color: '#00869A', weight: 4, opacity: .85 }).addTo(map), amb: null, hosp: null, fitted: false };
-      if (hp) m.hosp = L.marker(hp, { icon: L.divIcon({ className: '', html: '<div class="hosp-marker" aria-hidden="true">+</div>', iconSize: [24, 24], iconAnchor: [12, 12] }), title: state.hospital ? state.hospital.name : 'Hospital' }).addTo(map);
-      map.setView(hp || [12.9716, 77.5946], 14);
-      setTimeout(function () { map.invalidateSize(); }, 50);
+      var map = GH.maps.create(mapEl, { center: hpLL || amb || undefined, zoom: 14 });
+      m = state.maps[card.case_code] = { map: map, userAt: 0, fitted: false,
+        trail: L.polyline([], { color: '#00869A', weight: 4, opacity: .85 }).addTo(map),
+        link: L.polyline([], { color: '#AE570F', weight: 2, opacity: .7, dashArray: '6 6' }).addTo(map),
+        ring: null, amb: null, hosp: null, origin: null };
+      map.on('dragstart', function () { m.userAt = Date.now(); });
+      map.on('zoomstart', function () { if (!m.fitting) m.userAt = Date.now(); });
+    }
+    /* Hospital end — moves when this desk reports a better location. */
+    if (hpLL) {
+      if (!m.hosp) m.hosp = L.marker(hpLL, { icon: GH.maps.icons.hospital(hp.source === 'desk'), keyboard: false }).addTo(m.map);
+      else { m.hosp.setLatLng(hpLL); m.hosp.setIcon(GH.maps.icons.hospital(hp.source === 'desk')); }
+      m.hosp.bindTooltip(hospitalLabel(hp));
+    }
+    /* Where the case was sent from. */
+    if (org && kind === 'active') {
+      if (!m.origin) m.origin = L.marker(org, { icon: GH.maps.icons.origin(), keyboard: false }).addTo(m.map).bindTooltip('Case sent from here · ' + GH.timeOf(card.created_at));
     }
     m.trail.setLatLngs(pts);
-    if (pts.length) {
-      var last = pts[pts.length - 1];
-      if (!m.amb) m.amb = L.marker(last, { icon: L.divIcon({ className: '', html: '<div class="amb-marker" aria-hidden="true"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), title: 'Ambulance' }).addTo(m.map);
-      else m.amb.setLatLng(last);
-      if (!m.fitted || pts.length % 6 === 0) {
-        var b = L.latLngBounds(pts.concat(hp ? [hp] : []));
-        m.map.fitBounds(b.pad(0.25), { maxZoom: 16 });
-        m.fitted = true;
-      }
-      tag.hidden = true;
-    } else {
-      tag.hidden = false; tag.textContent = 'Waiting for the ambulance’s first GPS fix';
+    if (amb) {
+      var lp = card.last_position, rough = !!(last && lp && lp.approximate);
+      var icon = GH.maps.icons.ambulance(card.priority, rough || !last);
+      if (!m.amb) m.amb = L.marker(amb, { icon: icon, keyboard: false, zIndexOffset: 500 }).addTo(m.map);
+      else { m.amb.setLatLng(amb); m.amb.setIcon(icon); }
+      m.amb.bindTooltip(last ? 'Ambulance · ' + GH.secondsAgo(lp.at) : 'Ambulance was here when it sent the case · ' + GH.timeOf(card.created_at));
+      /* The uncertainty of the fix, drawn, so a rough position looks rough. */
+      var accM = last && lp && lp.accuracy_m != null ? Number(lp.accuracy_m) : (!last && card.origin && card.origin.accuracy_m != null ? Number(card.origin.accuracy_m) : null);
+      if (accM != null && accM >= 25) {
+        if (!m.ring) m.ring = L.circle(amb, { radius: accM, color: '#00869A', weight: 1, opacity: .5, fillOpacity: .08, interactive: false }).addTo(m.map);
+        else { m.ring.setLatLng(amb); m.ring.setRadius(accM); }
+      } else if (m.ring) { m.map.removeLayer(m.ring); m.ring = null; }
+      m.link.setLatLngs(hpLL ? [amb, hpLL] : []);
     }
+    /* Keep the ambulance and the hospital in view — unless someone has just
+       panned or zoomed the map by hand, then leave it alone for 30 s. */
+    var want = (amb ? [amb] : []).concat(hpLL ? [hpLL] : []);
+    if (want.length) {
+      var idle = Date.now() - m.userAt > 30000;
+      var outside = amb && !m.map.getBounds().pad(-0.08).contains(amb);
+      if (!m.fitted || (idle && outside)) {
+        m.fitting = true;
+        if (want.length > 1) m.map.fitBounds(L.latLngBounds(want).pad(0.3), { maxZoom: 16, animate: m.fitted });
+        else m.map.setView(want[0], 15, { animate: m.fitted });
+        m.fitting = false; m.fitted = true;
+      }
+    }
+    if (kind === 'pending') {
+      var km = org && hpLL ? GH.distanceKm({ lat: org[0], lng: org[1] }, hp) : null;
+      tag.hidden = km == null; tag.textContent = km == null ? '' : 'Sent from here · ' + GH.km(km) + ' from you';
+    } else if (!last) {
+      tag.hidden = false; tag.textContent = org ? 'No GPS yet — showing where the case was sent from' : 'Waiting for the ambulance’s first GPS fix';
+    } else tag.hidden = true;
   }
   function destroyMap(code) {
     var m = state && state.maps[code];
@@ -381,7 +501,8 @@
   function mergeLive(prev, next) {
     if (!prev || !prev.last_position || !next.last_position) return next;
     return Date.parse(prev.last_position.at) > Date.parse(next.last_position.at)
-      ? Object.assign({}, next, { last_position: prev.last_position, track: prev.track, live_eta_minutes: prev.live_eta_minutes, eta_source: prev.eta_source, remaining_distance_km: prev.remaining_distance_km })
+      ? Object.assign({}, next, { last_position: prev.last_position, track: prev.track, live_eta_minutes: prev.live_eta_minutes, eta_source: prev.eta_source, remaining_distance_km: prev.remaining_distance_km,
+          est_eta_minutes: prev.est_eta_minutes, moving_kmh: prev.moving_kmh })
       : next;
   }
 
@@ -546,15 +667,19 @@
   }
 
   /* ── sound ───────────────────────────────────────────────────────────── */
-  function beep() {
-    if (!state.sound) return;
+  /* Rising three-note chime: an ambulance is about to arrive. Distinct from
+     the two-beep new-case alert so the room can tell them apart. */
+  function chime() { tones([660, 880, 1100], 0.18); }
+  function beep() { tones([880, 880], 0.22); }
+  function tones(freqs, gap) {
+    if (!state || !state.sound) return;
     try {
       var Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return;
       state.audio = state.audio || new Ctx();
       if (state.audio.state === 'suspended') state.audio.resume();
-      [0, 0.22].forEach(function (offset) {
-        var o = state.audio.createOscillator(), g = state.audio.createGain(), t0 = state.audio.currentTime + offset;
-        o.type = 'sine'; o.frequency.value = 880;
+      freqs.forEach(function (freq, i) {
+        var o = state.audio.createOscillator(), g = state.audio.createGain(), t0 = state.audio.currentTime + i * gap;
+        o.type = 'sine'; o.frequency.value = freq;
         g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
         o.connect(g).connect(state.audio.destination); o.start(t0); o.stop(t0 + 0.2);
       });
@@ -570,7 +695,12 @@
   function connect() {
     if (!window.io) { setLive(false, 'Realtime unavailable — refreshing every 10 s'); return; }
     var s = state.socket = window.io({ transports: ['websocket', 'polling'], query: { role: 'hospital' }, auth: { token: (GH.session() || {}).token } });
-    s.on('connect', function () { setLive(true, 'Live'); refreshQueue(); });
+    s.on('connect', function () {
+      setLive(true, 'Live'); refreshQueue();
+      /* The server keeps desk locations in memory: after a restart it has
+         forgotten this one, so say it again on every (re)connect. */
+      if (state.sentFix) sendDeskFix(state.sentFix);
+    });
     s.on('disconnect', function () { setLive(false, 'Reconnecting…'); });
     s.on('connect_error', function () { setLive(false, 'Offline — retrying'); });
     s.on('hospital:rejected', function (d) {
@@ -604,8 +734,10 @@
     s.on('case:position', function (d) {
       var c = state.active[d.case_code];
       if (!c || c.status === 'ARRIVED' || d.lat == null) return;
-      c.track = (c.track || []).concat([{ lat: d.lat, lng: d.lng, at: d.at, accuracy_m: d.accuracy_m, speed_kmh: d.speed_kmh }]).slice(-120);
+      c.track = (c.track || []).concat([{ lat: d.lat, lng: d.lng, at: d.at, accuracy_m: d.accuracy_m, approximate: d.approximate, speed_kmh: d.speed_kmh }]).slice(-120);
       c.last_position = d; c.remaining_distance_km = d.distance_km; c.live_eta_minutes = d.live_eta_minutes; c.eta_source = d.eta_source;
+      c.est_eta_minutes = d.est_eta_minutes; c.moving_kmh = d.moving_kmh;
+      if (d.hospital) c.tracking_hospital = d.hospital;
       paint();
     });
     s.on('case:delay', function (d) {
@@ -619,6 +751,56 @@
         state.capacity = Object.assign(state.capacity, p.capacity); paintCapacity();
       }
     });
+  }
+
+  /* ── this desk's location ────────────────────────────────────────────────
+     Read every time the desk opens and whenever the screen's location moves,
+     and reported to the server, which uses it as the hospital end of the map
+     and of every ETA (unless it is too rough or implausibly far — then the
+     directory address, and #hereNote says why). */
+  function startDeskLocation() {
+    var geo = window.navigator && window.navigator.geolocation;
+    if (!geo || typeof geo.watchPosition !== 'function') { state.geoError = 'This screen cannot share its location'; paintHere(); return; }
+    paintHere();
+    try {
+      state.geoWatch = geo.watchPosition(function (pos) {
+        if (!state) return;
+        var c = pos && pos.coords; if (!c) return;
+        var fix = { lat: c.latitude, lng: c.longitude, accuracy_m: c.accuracy == null ? null : Math.round(c.accuracy), t: Date.now() };
+        var prev = state.sentFix;
+        var moved = !prev || (GH.distanceKm(prev, fix) || 0) * 1000 > 25 ||
+          (fix.accuracy_m != null && prev.accuracy_m != null && fix.accuracy_m < prev.accuracy_m * 0.6) || fix.t - prev.t > 300000;
+        state.geoError = null;
+        if (moved) { state.sentFix = fix; sendDeskFix(fix); }
+      }, function (err) {
+        if (!state) return;
+        state.geoError = err && err.code === 1 ? 'Location permission was refused on this screen' : 'This screen could not find its location';
+        paintHere();
+      }, { enableHighAccuracy: true, maximumAge: 60000, timeout: 30000 });
+    } catch (_) { state.geoError = 'This screen cannot share its location'; paintHere(); }
+  }
+  function sendDeskFix(fix) {
+    GH.api('/desk/location', { method: 'PUT', body: { lat: fix.lat, lng: fix.lng, accuracy_m: fix.accuracy_m } }).then(function (b) {
+      if (!state) return;
+      if (b && b.location) state.here = b.location;
+      paintHere(); paint();
+      if (b && b.live_cases_updated) refreshQueue();
+    }).catch(function () { /* reported again on the next move or reconnect */ });
+  }
+  function paintHere() {
+    var el = $('#hereNote'); if (!el || !state) return;
+    var h = state.here, txt;
+    var approxAddr = h && h.coord_source && h.coord_source !== 'listed' ? ' (approximate address)' : '';
+    if (h && h.source === 'desk') txt = 'Map uses this screen’s location' + (h.accuracy_m != null ? ' (±' + GH.km(h.accuracy_m / 1000) + ')' : '');
+    else {
+      var why = state.geoError ? state.geoError
+        : h && h.reason === 'DESK_FIX_ROUGH' ? 'this screen’s location is too rough' + (h.desk_accuracy_m != null ? ' (±' + GH.km(h.desk_accuracy_m / 1000) + ')' : '')
+        : h && h.reason === 'DESK_FIX_FAR' ? 'this screen reports a place far from the hospital'
+        : !state.sentFix ? 'finding this screen’s location…' : 'this screen’s location is not usable';
+      txt = 'Map uses the hospital address' + approxAddr + ' — ' + why;
+    }
+    el.textContent = txt;
+    el.classList.toggle('is-desk', !!(h && h.source === 'desk'));
   }
 
   /* ── lifecycle ───────────────────────────────────────────────────────── */
@@ -652,8 +834,12 @@
     $('#hospMeta').textContent = hospital ? [hospital.district, hospital.state, 'ID ' + hospital.hospital_id].filter(Boolean).join(' · ') : '';
     $('#acctName').textContent = account.username;
     $('#acctInitials').textContent = GH.initials(hospital ? hospital.name : account.username);
-    paint(); paintCapacity();
+    state.here = hospital && hospital.lat != null && hospital.lng != null
+      ? { lat: Number(hospital.lat), lng: Number(hospital.lng), source: 'directory', coord_source: hospital.coord_source || null, reason: 'NO_DESK_FIX' } : null;
+    paint(); paintCapacity(); paintHere();
     refreshQueue(); loadCapacity(); loadNearby(); loadNumbers();
+    GH.api('/desk/me').then(function (b) { if (state && b && b.location && !state.sentFix) { state.here = b.location; paintHere(); paint(); } }).catch(function () {});
+    startDeskLocation();
     connect();
     state.timers.push(setInterval(refreshQueue, 10000));
     state.timers.push(setInterval(loadNumbers, 60000));
@@ -664,7 +850,22 @@
         el.classList.toggle('is-urgent', ms < 60000);
       });
       paintCapacityAge();
+      tickLive();
     }, 1000));
+  }
+  /* Re-word each en-route statement every second (ages, staleness) without
+     re-rendering the cards — maps and focus stay put. */
+  function tickLive() {
+    if (!state) return;
+    Object.keys(state.active).forEach(function (code) {
+      var c = state.active[code], el = state.els[code];
+      if (!el || c.status === 'ARRIVED') return;
+      var st = statement(c), line = $('.live-line', el);
+      if (line) { line.className = 'live-line tone-' + st.tone; $('.txt', line).textContent = st.text; }
+      var fix = $('.stat-fix .v', el);
+      if (fix && c.last_position && c.last_position.at) fix.textContent = duration(Math.max(0, Date.now() - Date.parse(c.last_position.at)));
+      checkNear(c, st);
+    });
   }
   function paintCapacityAge() { if (state && state.capacity.updated_at) $('#capUpdated').textContent = 'updated ' + GH.ago(state.capacity.updated_at); }
 
@@ -672,6 +873,7 @@
     if (!state) return;
     state.timers.forEach(function (t) { clearInterval(t); clearTimeout(t); });
     if (state.socket) { try { state.socket.disconnect(); } catch (_) {} }
+    if (state.geoWatch != null) { try { window.navigator.geolocation.clearWatch(state.geoWatch); } catch (_) {} }
     Object.keys(state.maps).forEach(destroyMap);
     Object.keys(state.els).forEach(function (k) { state.els[k].remove(); });
     state = null;

@@ -21,10 +21,9 @@
 'use strict';
 const hospitalsConfig = require('../config/hospitals');
 const { getStore } = require('../store');
-const { toDashboardCard, toAmbulanceStatus, updatePatient, markArrived, crewTokenValid } = require('../services/broadcastService');
+const { toDashboardCard, toAmbulanceStatus, updatePatient, markArrived, crewTokenValid, recordPosition } = require('../services/broadcastService');
 const { deskAuthMode } = require('../middleware/hospitalIdentity');
 const auth = require('../services/authService');
-const tracking = require('../services/trackingService');
 const capacity = require('../services/capacityService');
 const audit = require('../services/auditService');
 
@@ -126,40 +125,13 @@ function socketHandler(io) {
       }).catch(err => respond(ack, false, 'SERVER_ERROR', err.message));
     });
 
+    /* The HTTP fallback (POST /requests/:code/position) runs the same code:
+       broadcastService.recordPosition. */
     socket.on('ambulance:position', (payload, ack) => {
       crewCase(payload).then(c => {
         if (c.error) return respond(ack, false, c.error[0], c.error[1]);
-        const { code, record, safe } = c;
-        if (record.status !== 'ACCEPTED' || record.arrived_at) return respond(ack, false, 'NOT_TRACKING', 'Case is not in tracking state');
-        if (safe.lat == null || safe.lng == null) return respond(ack, false, 'INVALID_COORD', 'lat/lng required');
-        const winner = record.targets.find(t => t.hospital_id === record.accepted_hospital_id);
-        if (!winner) return respond(ack, false, 'NO_ACCEPTOR', 'No accepting hospital');
-
-        const r = tracking.append(code, winner.lat, winner.lng, {
-          lat: safe.lat, lng: safe.lng,
-          accuracy_m: safe.accuracy_m == null ? null : Number(safe.accuracy_m),
-          speed_kmh: safe.speed_kmh == null ? null : Number(safe.speed_kmh),
-          source: 'gps',
-          at: safe.at || new Date().toISOString(),
-        });
-        if (r.error) return respond(ack, false, r.error, 'Location fix is invalid, inaccurate or too old');
-        if (r.throttled) return respond(ack, true, null, 'throttled');
-        const live = tracking.snapshot(code);
-        audit.record(code, 'POSITION', { lat: r.point.lat, lng: r.point.lng,
-          live_eta: r.record.live_eta_minutes, eta_source: r.record.eta_source }, { kind: 'crew' });
-        /* The accepting hospital gets the full position. */
-        io.to(`hospital_${record.accepted_hospital_id}`).emit('case:position', {
-          case_code: code, lat: r.point.lat, lng: r.point.lng,
-          accuracy_m: r.point.accuracy_m, speed_kmh: r.point.speed_kmh,
-          source: r.point.source, at: r.point.at,
-          distance_km: live.distance_km, live_eta_minutes: live.live_eta_minutes, eta_source: live.eta_source,
-        });
-        /* The crew gets only the derived ETA and distance. */
-        io.to(`case_${code}`).emit('case:position', {
-          case_code: code, distance_km: live.distance_km,
-          live_eta_minutes: live.live_eta_minutes, eta_source: live.eta_source, at: r.point.at,
-        });
-        respond(ack, true, null, 'ok');
+        const r = recordPosition(c.code, c.record, c.safe, io);
+        respond(ack, r.ok, r.ok ? null : r.reason, r.message, r.ok ? { approximate: !!r.approximate } : undefined);
       }).catch(err => respond(ack, false, 'SERVER_ERROR', err.message));
     });
 

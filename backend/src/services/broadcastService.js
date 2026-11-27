@@ -20,6 +20,7 @@ const capacity = require('./capacityService');
 const match = require('./matchService');
 const audit = require('./auditService');
 const directory = require('./directoryService');
+const deskLocation = require('./deskLocationService');
 
 const num = v => (v === null || v === undefined || v === '' || isNaN(Number(v)) ? null : Number(v));
 const text = v => {
@@ -133,9 +134,11 @@ function toDashboardCard(record, hospitalId) {
     needs: match.needsFromCase(record),
     last_position: live.last_position || null,
     track: live.track || [],
-    tracking_hospital: ownTrack && winner ? { lat: winner.lat, lng: winner.lng } : null,
+    tracking_hospital: ownTrack ? hospitalEnd(record) : null,
     remaining_distance_km: live.distance_km == null ? null : live.distance_km,
     live_eta_minutes: live.live_eta_minutes == null ? null : live.live_eta_minutes,
+    est_eta_minutes: live.est_eta_minutes == null ? null : live.est_eta_minutes,
+    moving_kmh: live.moving_kmh == null ? null : live.moving_kmh,
     eta_source: live.eta_source || 'crew',
     patient_history: record.patient_history || [],
     capacity: myCap || null,
@@ -169,10 +172,84 @@ function toAmbulanceStatus(record) {
     body.last_patient_updated_at = record.last_patient_updated_at || record.accepted_at || null;
     const live = record.status === 'ACCEPTED' ? tracking.snapshot(record.case_code) : {};
     body.live_eta_minutes = live.live_eta_minutes == null ? null : live.live_eta_minutes;
+    body.est_eta_minutes = live.est_eta_minutes == null ? null : live.est_eta_minutes;
+    body.remaining_distance_km = live.distance_km == null ? null : live.distance_km;
     body.eta_source = live.eta_source || 'crew';
     body.position_at = live.last_position ? live.last_position.at : null;
   }
   return body;
+}
+
+/* ── Live position ──────────────────────────────────────────────────────
+   The hospital end of the map and the ETA: the accepting desk's own reported
+   location when it is usable, else the hospital's directory address. */
+function hospitalEnd(record) {
+  if (!record || !record.accepted_hospital_id) return null;
+  const eff = deskLocation.effective(record.accepted_hospital_id);
+  if (eff) return eff;
+  const winner = record.targets.find(t => t.hospital_id === record.accepted_hospital_id);
+  return winner && winner.lat != null && winner.lng != null
+    ? { lat: Number(winner.lat), lng: Number(winner.lng), source: 'directory', accuracy_m: null, at: null, coord_source: winner.coord_source || null, reason: 'NO_DESK_FIX' }
+    : null;
+}
+
+/**
+ * Record one GPS fix from the crew, by socket or by the HTTP fallback.
+ * Returns { ok, reason?, message }.
+ */
+function recordPosition(code, record, pos, io) {
+  if (record.status !== 'ACCEPTED' || record.arrived_at) return { ok: false, reason: 'NOT_TRACKING', message: 'Case is not in tracking state' };
+  if (!pos || pos.lat == null || pos.lng == null) return { ok: false, reason: 'INVALID_COORD', message: 'lat/lng required' };
+  const winner = record.targets.find(t => t.hospital_id === record.accepted_hospital_id);
+  if (!winner) return { ok: false, reason: 'NO_ACCEPTOR', message: 'No accepting hospital' };
+  const end = hospitalEnd(record) || { lat: null, lng: null };
+
+  const r = tracking.append(code, end.lat, end.lng, {
+    lat: pos.lat, lng: pos.lng,
+    accuracy_m: pos.accuracy_m == null ? null : Number(pos.accuracy_m),
+    speed_kmh: pos.speed_kmh == null ? null : Number(pos.speed_kmh),
+    source: 'gps',
+    at: pos.at || new Date().toISOString(),
+  });
+  if (r.error) return { ok: false, reason: r.error, message: 'Location fix is invalid, too rough (over ' + tracking.MAX_ACCURACY_M + ' m) or too old' };
+  if (r.throttled) return { ok: true, message: 'throttled' };
+  if (r.duplicate) return { ok: true, message: 'duplicate' };
+
+  const live = tracking.snapshot(code);
+  audit.record(code, 'POSITION', { lat: r.point.lat, lng: r.point.lng, accuracy_m: r.point.accuracy_m,
+    live_eta: r.record.live_eta_minutes, eta_source: r.record.eta_source }, { kind: 'crew' });
+  if (io) {
+    /* The accepting hospital gets the full position. */
+    io.to(`hospital_${record.accepted_hospital_id}`).emit('case:position', {
+      case_code: code, lat: r.point.lat, lng: r.point.lng,
+      accuracy_m: r.point.accuracy_m, approximate: r.point.approximate, speed_kmh: r.point.speed_kmh,
+      source: r.point.source, at: r.point.at,
+      distance_km: live.distance_km, live_eta_minutes: live.live_eta_minutes, eta_source: live.eta_source,
+      est_eta_minutes: live.est_eta_minutes, moving_kmh: live.moving_kmh,
+      hospital: hospitalEnd(record),
+    });
+    /* The crew gets only the derived ETA and distance. */
+    io.to(`case_${code}`).emit('case:position', {
+      case_code: code, distance_km: live.distance_km,
+      live_eta_minutes: live.live_eta_minutes, est_eta_minutes: live.est_eta_minutes,
+      eta_source: live.eta_source, at: r.point.at, approximate: r.point.approximate,
+    });
+  }
+  return { ok: true, message: 'ok', approximate: r.point.approximate };
+}
+
+/** A desk reported a new location: move the hospital end of its live cases. */
+async function retargetHospital(hospitalId) {
+  const end = deskLocation.effective(hospitalId);
+  if (!end) return 0;
+  const records = await getStore().listForHospital(hospitalId);
+  let n = 0;
+  for (const rec of records) {
+    if (rec.status === 'ACCEPTED' && Number(rec.accepted_hospital_id) === Number(hospitalId) && !rec.arrived_at) {
+      if (tracking.retarget(rec.case_code, end.lat, end.lng)) n++;
+    }
+  }
+  return n;
 }
 
 /* ── Create ─────────────────────────────────────────────────────────── */
@@ -489,5 +566,5 @@ module.exports = {
   crewTokenValid, hashToken, callAheadOptions,
   CASE_TYPES, createBroadcast, acceptBroadcast, declineBroadcast, cancelBroadcast,
   updatePatient, markArrived, resolveTargets, toDashboardCard, toAmbulanceStatus,
-  lifecycleFor, startExpiryLoop,
+  lifecycleFor, startExpiryLoop, hospitalEnd, recordPosition, retargetHospital,
 };

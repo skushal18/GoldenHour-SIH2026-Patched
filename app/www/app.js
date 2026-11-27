@@ -690,6 +690,86 @@
       clearTimeout(timer);
     }
   }
+  const MAX_ACCURACY_M = 2e3;
+  const PRECISE_ACCURACY_M = 200;
+  const MAX_FIX_AGE_MS = 3e4;
+  function fixFromPosition(pos, now) {
+    const t = now == null ? Date.now() : now;
+    const c = pos && pos.coords;
+    const lat = c ? Number(c.latitude) : NaN, lng = c ? Number(c.longitude) : NaN;
+    if (!c || c.latitude == null || c.longitude == null || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180 || lat === 0 && lng === 0) return { ok: false, reason: "NO_COORDS" };
+    const ts = pos.timestamp;
+    if (!Number.isFinite(ts) || t - ts > MAX_FIX_AGE_MS || ts > t + 3e4) return { ok: false, reason: "OLD_FIX" };
+    const accuracy = c.accuracy == null || !Number.isFinite(Number(c.accuracy)) ? null : Math.round(Number(c.accuracy));
+    if (accuracy != null && accuracy > MAX_ACCURACY_M) return { ok: false, reason: "TOO_ROUGH", accuracy_m: accuracy };
+    return { ok: true, fix: {
+      lat,
+      lng,
+      accuracy_m: accuracy,
+      speed_kmh: c.speed != null && Number.isFinite(Number(c.speed)) && c.speed >= 0 ? Math.round(c.speed * 3.6) : null,
+      at: new Date(ts).toISOString(),
+      approximate: accuracy != null && accuracy > PRECISE_ACCURACY_M
+    } };
+  }
+  async function sharePosition({ socket, fetch: fetcher, apiRoot, caseCode, crewToken, fix, timeoutMs = 6e3 }) {
+    const payload = {
+      case_code: caseCode,
+      crew_token: crewToken,
+      lat: fix.lat,
+      lng: fix.lng,
+      accuracy_m: fix.accuracy_m,
+      speed_kmh: fix.speed_kmh,
+      source: "gps",
+      at: fix.at
+    };
+    if (socket && socket.connected) {
+      const ack = await new Promise((resolve) => {
+        const timer2 = setTimeout(() => resolve(null), timeoutMs);
+        try {
+          socket.emit("ambulance:position", payload, (body) => {
+            clearTimeout(timer2);
+            resolve(body || null);
+          });
+        } catch (_) {
+          clearTimeout(timer2);
+          resolve(null);
+        }
+      });
+      if (ack && ack.success === true) return { success: true, via: "socket", approximate: !!fix.approximate };
+      if (ack && ack.success === false) return { success: false, via: "socket", reason: ack.reason, message: ack.message };
+    }
+    if (!apiRoot || typeof fetcher !== "function") return { success: false, via: "none", reason: "OFFLINE", message: "No connection to the server" };
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetcher(apiRoot + "/requests/" + encodeURIComponent(caseCode) + "/position", {
+        method: "POST",
+        signal: controller ? controller.signal : void 0,
+        headers: { "Content-Type": "application/json", "X-Crew-Token": crewToken || "" },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.ok && body && body.success === true) return { success: true, via: "http", approximate: !!fix.approximate };
+      return { success: false, via: "http", reason: body && body.reason || "HTTP_" + response.status, message: body && body.message };
+    } catch (err) {
+      return { success: false, via: "http", reason: "OFFLINE", message: "No connection to the server" };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  function describeShare(result) {
+    if (!result) return "Waiting for GPS…";
+    if (result.reason === "TOO_ROUGH") return "GPS too rough to share (±" + (result.accuracy_m >= 1e3 ? (result.accuracy_m / 1e3).toFixed(1) + " km" : result.accuracy_m + " m") + ") — move into the open";
+    if (result.reason === "OLD_FIX") return "Waiting for a fresh GPS fix…";
+    if (result.reason === "NO_COORDS") return "Waiting for GPS…";
+    if (result.success) {
+      const how = result.via === "http" ? " (backup connection)" : "";
+      return result.approximate ? "Approximate location shared with the hospital" + how + " — GPS is rough here" : "GPS location delivered to the accepting hospital" + how;
+    }
+    if (result.reason === "OFFLINE") return "No connection — location will be sent when the signal returns";
+    if (result.reason === "NOT_TRACKING") return "Location sharing has ended for this case";
+    return "Location was not accepted — waiting for a fresh fix";
+  }
   const AGE_BANDS = [
     { id: "baby", label: "Baby", hint: "0 – 3", value: 1, min: 0, max: 3 },
     { id: "child", label: "Child", hint: "3 – 17", value: 8, min: 3, max: 18 },
@@ -1445,7 +1525,8 @@
       lastResponse: null,
       lastPayload: null,
       lastClientRequestId: null,
-      crewTokens: {}
+      crewTokens: {},
+      lastShare: null
     };
     let pollTimer = null;
     let flushTimer = null;
@@ -2460,53 +2541,37 @@
       if (tracking) tracking.hidden = false;
       if (state.demo || geoWatch != null) return;
       const geo = win.navigator && win.navigator.geolocation;
-      if (!socket) {
-        const t = $("trackingText");
-        if (t) t.textContent = "Live tracking unavailable — realtime connection is required";
-        return;
-      }
       const code = state.activeCaseCode;
       const text = $("trackingText");
-      if (text) text.textContent = "Waiting for GPS and server confirmation…";
-      let lastSent = 0;
+      if (text) text.textContent = "Waiting for GPS…";
+      let lastSent = 0, inFlight = false;
       geoWatch = watchPosition({
         native: isCapacitorRuntime(win),
         plugin: Geolocation$1,
         geolocation: geo,
         onPosition: (pos) => {
           if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== "ACCEPTED") return;
-          if (!socket || !socket.connected) {
-            if (text) text.textContent = "Disconnected — hospital is not receiving location updates";
-            return;
-          }
           const now = Date.now();
-          if (now - lastSent < 1e4) return;
-          const c = pos && pos.coords;
-          const coords = validCoords(c && c.latitude, c && c.longitude);
-          const timestamp = pos && pos.timestamp;
-          if (!coords || !Number.isFinite(timestamp) || now - timestamp > 3e4 || timestamp > now + 3e4 || c.accuracy > 200) {
-            if (text) text.textContent = "Waiting for a fresh, accurate GPS fix…";
+          if (inFlight || now - lastSent < 1e4) return;
+          const checked = fixFromPosition(pos, now);
+          if (!checked.ok) {
+            if (text) text.textContent = describeShare(checked);
             return;
           }
           lastSent = now;
-          let confirmed = false;
-          const timer = setTimeout(() => {
-            if (!confirmed && text && state.activeCaseCode === code) text.textContent = "Location delivery unconfirmed — waiting for connection";
-          }, 6e3);
-          socket.volatile.emit("ambulance:position", {
-            case_code: code,
-            crew_token: crewTokenFor(code),
-            lat: coords.lat,
-            lng: coords.lng,
-            accuracy_m: toNumberOrNull(c.accuracy),
-            speed_kmh: c.speed != null && c.speed >= 0 ? Math.round(c.speed * 3.6) : null,
-            source: "gps",
-            at: new Date(timestamp).toISOString()
-          }, (ack) => {
-            confirmed = true;
-            clearTimeout(timer);
+          inFlight = true;
+          sharePosition({
+            socket,
+            fetch: win.fetch && win.fetch.bind(win),
+            apiRoot: env.apiRoot,
+            caseCode: code,
+            crewToken: crewTokenFor(code),
+            fix: checked.fix
+          }).then((result) => {
+            inFlight = false;
             if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== "ACCEPTED") return;
-            if (text) text.textContent = ack && ack.success ? "GPS location delivered to the accepting hospital" : "Location was not accepted — waiting for a fresh fix";
+            state.lastShare = result;
+            if (text) text.textContent = describeShare(result);
           });
         },
         onError: (err) => {
@@ -2533,7 +2598,10 @@
     function paintTracking(body) {
       const text = $("trackingText");
       const eta = $("activeEta");
-      if (body && body.live_eta_minutes != null && eta) eta.textContent = body.live_eta_minutes + " min";
+      if (body && eta) {
+        if (body.live_eta_minutes != null) eta.textContent = body.live_eta_minutes + " min";
+        else if (body.est_eta_minutes != null) eta.textContent = "≈ " + body.est_eta_minutes + " min";
+      }
       if (!text || !body) return;
       if (body.eta_source === "stale") {
         text.textContent = "Location is stale — hospital is waiting for a fresh GPS fix";
@@ -2541,11 +2609,11 @@
         return;
       }
       if (!socket || !socket.connected) {
-        text.textContent = "Disconnected — hospital is not receiving location updates";
+        text.textContent = state.lastShare && state.lastShare.success ? describeShare(state.lastShare) : "Disconnected — hospital is not receiving location updates";
         return;
       }
       if (!body.position_at && !body.at) return;
-      text.textContent = ["stalled", "stationary"].includes(body.eta_source) ? "Not moving — tell the hospital if you are delayed" : "Sharing location with the accepting hospital" + (body.live_eta_minutes != null ? " · " + body.live_eta_minutes + " min out" : "");
+      text.textContent = ["stalled", "stationary"].includes(body.eta_source) ? "Not moving — tell the hospital if you are delayed" : (body.approximate ? "Sharing an approximate location (GPS is rough here)" : "Sharing location with the accepting hospital") + (body.live_eta_minutes != null ? " · " + body.live_eta_minutes + " min out" : body.est_eta_minutes != null ? " · about " + body.est_eta_minutes + " min out" : "");
     }
     const delayChoice = { reason: "traffic", minutes: 10 };
     function pickIn(containerId, attr, value) {

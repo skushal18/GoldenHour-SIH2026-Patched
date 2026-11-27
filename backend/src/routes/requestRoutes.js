@@ -19,7 +19,7 @@ const express = require('express');
 const router = express.Router();
 
 const { CASE_TYPES } = require('../data/caseTypes');
-const { createBroadcast, cancelBroadcast, markArrived, toAmbulanceStatus, crewTokenValid } = require('../services/broadcastService');
+const { createBroadcast, cancelBroadcast, markArrived, toAmbulanceStatus, crewTokenValid, recordPosition } = require('../services/broadcastService');
 const { getStore } = require('../store');
 const { validateBroadcast } = require('../services/validation');
 const { createRateLimiter } = require('../middleware/protect');
@@ -41,6 +41,9 @@ if (idemSweeper.unref) idemSweeper.unref();
    than the flood this prevents. It is a runaway-client guard, not a policy. */
 const broadcastLimiter = createRateLimiter({ windowMs: 60_000, max: 30, name: 'broadcasts' });
 const readLimiter = createRateLimiter({ windowMs: 60_000, max: 600, name: 'status checks' });
+/* One fix every 10 s per ambulance; many ambulances can share a mobile
+   carrier's address, so the ceiling is per address and generous. */
+const positionLimiter = createRateLimiter({ windowMs: 60_000, max: 600, name: 'position updates' });
 
 router.get('/case-types', readLimiter, (req, res) => res.json(CASE_TYPES));
 
@@ -137,6 +140,26 @@ router.post('/requests/:code/arrived', broadcastLimiter, async (req, res, next) 
       return res.status(status).json({ success: false, reason: result.reason, message: result.message });
     }
     res.json(Object.assign({ success: true, already: !!result.already }, toAmbulanceStatus(result.record)));
+  } catch (err) { next(err); }
+});
+
+/* GPS from the crew's phone. The socket is the normal path; this is the same
+   thing over plain HTTP for when the socket is down — a phone switching
+   between towers, a captive Wi-Fi, a proxy that will not upgrade — so the
+   ER map keeps moving. Same checks, same code: recordPosition. */
+router.post('/requests/:code/position', positionLimiter, async (req, res, next) => {
+  try {
+    const record = await loadForCrew(req, res);
+    if (!record) return;
+    const b = req.body || {};
+    const r = recordPosition(record.case_code, record, {
+      lat: b.lat, lng: b.lng, accuracy_m: b.accuracy_m, speed_kmh: b.speed_kmh, at: b.at,
+    }, req.app.get('io'));
+    if (!r.ok) {
+      const status = r.reason === 'NOT_TRACKING' || r.reason === 'NO_ACCEPTOR' ? 409 : 400;
+      return res.status(status).json({ success: false, reason: r.reason, message: r.message });
+    }
+    res.json({ success: true, message: r.message, approximate: !!r.approximate });
   } catch (err) { next(err); }
 });
 

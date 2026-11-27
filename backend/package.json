@@ -6,7 +6,7 @@
     "start": "node src/start.js",
     "dev": "node src/server.js --memory",
     "demo": "node src/server.js --memory",
-    "test": "node tests/security.test.js && node tests/directory.test.js && node tests/auth.test.js && node tests/activation.test.js && node tests/directory.mysql.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/desk-arrival-tracking.test.js && node tests/tracking.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js",
+    "test": "node tests/security.test.js && node tests/directory.test.js && node tests/auth.test.js && node tests/activation.test.js && node tests/directory.mysql.test.js && node tests/broadcast.smoke.js && node tests/broadcast.e2e.test.js && node tests/patient-edit.test.js && node tests/arrival-lifecycle.test.js && node tests/desk-arrival-tracking.test.js && node tests/tracking.test.js && node tests/live-map.test.js && node tests/capacity.test.js && node tests/matching.test.js && node tests/audit.test.js && node tests/analytics.test.js && node tests/idempotency.test.js",
     "schema": "node -e \"process.stdout.write(require('./src/store/migrate').schemaSql())\"",
     "seed:hospitals": "node scripts/seed-hospitals.js"
   },

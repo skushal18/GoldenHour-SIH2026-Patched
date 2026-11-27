@@ -27,6 +27,9 @@ const catalogue = require('../services/catalogueService');
 const audit = require('../services/auditService');
 const { requireAuth } = require('../middleware/auth');
 const { getStore, getAccounts } = require('../store');
+const tracking = require('../services/trackingService');
+const deskLocation = require('../services/deskLocationService');
+const { hospitalEnd } = require('../services/broadcastService');
 
 router.use(requireAuth(['SUPER_ADMIN']));
 
@@ -155,15 +158,43 @@ router.get('/catalogue', (req, res) => {
 
 router.get('/catalogue/states', (req, res) => res.json({ success: true, states: catalogue.states() }));
 
+/* Live cases, and what the network map needs: where each open case was sent
+   from, where each accepted ambulance is now and where it is going, and the
+   hospitals that can receive cases. Patient details stay with the hospitals. */
 router.get('/live', async (req, res, next) => {
   try {
     const recent = await getStore().listAll(100);
-    res.json({ success: true, cases: recent.map(r => ({
-      case_code: r.case_code, status: r.status, priority: r.priority, chief_complaint: r.chief_complaint,
-      created_at: r.created_at, accepted_at: r.accepted_at, arrived_at: r.arrived_at,
-      hospitals_notified: r.targets.length,
-      accepted_by: r.accepted_hospital_id ? ((r.targets.find(t => t.hospital_id === r.accepted_hospital_id) || {}).name || null) : null,
-    })) });
+    const point = (lat, lng) => (lat == null || lng == null ? null : { lat: Number(lat), lng: Number(lng) });
+    const cases = recent.map(r => {
+      const winner = r.accepted_hospital_id ? r.targets.find(t => t.hospital_id === r.accepted_hospital_id) || null : null;
+      const row = {
+        case_code: r.case_code, status: r.status, priority: r.priority, chief_complaint: r.chief_complaint,
+        created_at: r.created_at, accepted_at: r.accepted_at, arrived_at: r.arrived_at,
+        hospitals_notified: r.targets.length,
+        accepted_by: winner ? winner.name : null,
+        origin: r.status === 'PENDING' || r.status === 'ACCEPTED' ? point(r.origin && r.origin.lat, r.origin && r.origin.lng) : null,
+      };
+      if (r.status === 'ACCEPTED' && winner) {
+        const live = tracking.snapshot(r.case_code);
+        const end = hospitalEnd(r);
+        row.destination = end ? { hospital_id: winner.hospital_id, name: winner.name, lat: end.lat, lng: end.lng, source: end.source } : null;
+        row.position = live.last_position ? { lat: live.last_position.lat, lng: live.last_position.lng, at: live.last_position.at,
+          accuracy_m: live.last_position.accuracy_m, approximate: !!live.last_position.approximate } : null;
+        row.remaining_distance_km = live.distance_km == null ? null : Math.round(live.distance_km * 10) / 10;
+        row.live_eta_minutes = live.live_eta_minutes;
+        row.est_eta_minutes = live.est_eta_minutes;
+        row.eta_source = live.eta_source;
+      }
+      return row;
+    });
+    const ids = await getAccounts().activeHospitalIds();
+    const hospitals = ids.map(id => {
+      const h = directory.get(id);
+      const end = deskLocation.effective(id);
+      if (!h || !end) return null;
+      return { hospital_id: id, name: h.name, lat: end.lat, lng: end.lng, source: end.source };
+    }).filter(Boolean);
+    res.json({ success: true, cases, hospitals });
   } catch (err) { next(err); }
 });
 
