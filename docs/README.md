@@ -6,7 +6,7 @@
 |---|---|
 | [`../QUICKSTART.md`](../QUICKSTART.md) | the demo-day runbook: two laptops, one Wi-Fi, ten minutes |
 | [`../DEPLOYMENT.md`](../DEPLOYMENT.md) | local MySQL setup, and deploying to a real server |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | how the two repos were merged, the broadcast lifecycle, first-accept-wins, the design system |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | how v7 fits together: desk sign-in and the LAN-rehearsal mode, who a broadcast reaches, first-accept-wins, the store and schema, the front-end builds, the design system, the test suites |
 | [`ambulance-app-api-contract.md`](ambulance-app-api-contract.md) | the exact payload the ambulance app sends, and the rules the backend must honour |
 | [`screenshots/`](screenshots/) | captures of the running system |
 
