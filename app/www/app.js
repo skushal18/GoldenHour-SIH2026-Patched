@@ -2941,6 +2941,7 @@
       const etaMin = d.live && d.live.live_eta_minutes != null ? d.live.live_eta_minutes : r ? Math.max(1, Math.round(r.duration_s / 60)) : d.live ? d.live.est_eta_minutes : null;
       setT("navRemain", formatDistance(remainingM) + (r ? " by road" : ""));
       setT("navEta", etaMin != null ? etaMin + " min" : "—");
+      if (etaMin != null) setT("activeEta", etaMin + " min");
       setT("navArrive", etaMin != null ? new Date(Date.now() + etaMin * 6e4).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—");
       const steps = $("navSteps");
       if (steps) steps.innerHTML = r && r.steps ? r.steps.map((st) => '<li><span class="nav-glyph" aria-hidden="true">' + turnGlyph(st) + "</span><span>" + escapeHtml(st.instruction) + "</span><small>" + escapeHtml(formatDistance(st.distance_m)) + "</small></li>").join("") : "";
@@ -3543,7 +3544,8 @@
         set("activeBp", (v.systolic_bp || "—") + "/" + (v.diastolic_bp || "—"));
         set("activeSpo2", v.spo2);
         set("activeStatusText", STATUS_TEXT[active.status] || active.status);
-        set("activeEta", active.eta_minutes != null ? active.eta_minutes + " min" : "— min");
+        const navEta = nav.data && nav.code === active.case_code && $("navEta") ? $("navEta").textContent : "";
+        set("activeEta", /\d/.test(navEta) ? navEta : active.eta_minutes != null ? active.eta_minutes + " min" : "— min");
         set("activeFacility", active.accepted_by || "Waiting for a hospital");
         const notes = $("activeNotes");
         if (notes) notes.textContent = p.notes || "No additional notes";
