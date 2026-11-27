@@ -31,6 +31,7 @@ const requestRoutes = require('./routes/requestRoutes');
 const hospitalDeskRoutes = require('./routes/hospitalDeskRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const ambulanceRoutes = require('./routes/ambulanceRoutes');
 
 /* Refuses to continue on an unsafe production configuration. Everything below
    can then assume the environment is sane. A stack trace would only bury the
@@ -114,6 +115,7 @@ io.on('connection', touch);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/desk', hospitalDeskRoutes);
+app.use('/api/v1/ambulance', ambulanceRoutes);
 app.use('/api/v1', requestRoutes);
 
 /* ── Health ────────────────────────────────────────────────────────────────

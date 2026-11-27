@@ -253,7 +253,8 @@ async function retargetHospital(hospitalId) {
 }
 
 /* ── Create ─────────────────────────────────────────────────────────── */
-async function createBroadcast(body, io) {
+async function createBroadcast(body, io, opts) {
+  const unit = opts && opts.ambulance ? opts.ambulance : null;
   const store = getStore();
   const payload = body || {};
   const vitals = payload.vitals || {};
@@ -294,7 +295,9 @@ async function createBroadcast(body, io) {
     },
     radius_km: num(payload.broadcast_radius_km),
     eta_minutes: num(payload.eta_minutes),
-    notes: text(payload.notes), ambulance_id: text(payload.ambulance_id),
+    notes: text(payload.notes), ambulance_id: unit ? unit.registration : text(payload.ambulance_id),
+    /* The signed-in vehicle that sent the case; the body cannot claim another. */
+    ambulance: unit,
     images: Array.isArray(payload.images) ? payload.images.slice(0, 4) : [],
     targets,
     /* v5 */

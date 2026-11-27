@@ -19,16 +19,43 @@
   }
 
   /* ── session ─────────────────────────────────────────────────────────── */
+  /* A saved sign-in carries `seen`: refreshed every 20 s while any GoldenHour
+     page is open and when it closes. A visit that finds it older than
+     LEAVE_TIMEOUT_MINUTES — the site was left — starts at the sign-in form. */
+  var CFG = window.GH_DESK_CONFIG || {};
+  var LEAVE_MS = Math.max(1, Number(CFG.LEAVE_TIMEOUT_MINUTES) || 5) * 60000;
+  var signedOutReason = null;
   function readSession() {
-    try { var raw = localStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; }
-    catch (_) { return null; }
+    var s = null;
+    try { var raw = localStorage.getItem(SESSION_KEY); s = raw ? JSON.parse(raw) : null; } catch (_) { s = null; }
+    if (s && (!s.seen || Date.now() - Number(s.seen) > LEAVE_MS)) {
+      try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+      signedOutReason = 'You were signed out because GoldenHour was closed for more than ' + Math.round(LEAVE_MS / 60000) + ' minutes. Sign in again.';
+      return null;
+    }
+    return s;
   }
   var session = readSession();
   function saveSession(s) {
     session = s;
+    if (s) s.seen = Date.now();
     try { if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s)); else localStorage.removeItem(SESSION_KEY); } catch (_) {}
   }
   function getSession() { return session; }
+  function touchSession() {
+    if (!session) return;
+    /* Another tab may have signed out in the meantime: do not bring it back. */
+    try { if (!localStorage.getItem(SESSION_KEY)) { session = null; return; } } catch (_) {}
+    saveSession(session);
+  }
+  setInterval(touchSession, 20000);
+  window.addEventListener('pagehide', touchSession);
+  document.addEventListener('visibilitychange', touchSession);
+  /* End the session here and show the sign-in form with a reason. */
+  function expire(message) {
+    saveSession(null);
+    if (onSignedOut) onSignedOut(message);
+  }
 
   /* ── API ─────────────────────────────────────────────────────────────── */
   function api(path, options) {
@@ -206,7 +233,8 @@
 
   window.GH = {
     $: $, $$: $$, esc: esc, api: api,
-    session: getSession, saveSession: saveSession,
+    session: getSession, saveSession: saveSession, expire: expire,
+    signedOutReason: function () { return signedOutReason; },
     onSignedOut: function (fn) { onSignedOut = fn; },
     timeOf: timeOf, dateTime: dateTime, ago: ago, secs: secs, ageBand: ageBand, SEX: SEX, initials: initials,
     toast: toast, openSheet: openSheet, closeSheet: closeSheet,

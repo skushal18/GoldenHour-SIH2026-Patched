@@ -66,7 +66,7 @@
   <!-- ═══ Top bar ═══════════════════════════════════════════════════════ -->
   <header class="topbar glass" id="topbar">
     <div class="brand">
-      <span class="mark" aria-hidden="true"><svg class="i"><use href="#i-heart-pulse"/></svg></span>
+      <span class="mark gh-mark" data-logo aria-hidden="true"></span>
       <span class="brand-text">
         <span class="brand-name">Golden<em>Hour</em></span>
         <span class="brand-sub">Pre-arrival emergency coordination</span>
@@ -92,6 +92,23 @@
     <span class="banner-text" id="loadErrorText">The case list could not be loaded.</span>
     <button type="button" class="banner-cta" id="retryListsBtn">Retry</button>
   </div>
+
+  <!-- ═══ SIGN IN (this ambulance) ═════════════════════════════════════ -->
+  <main class="scroll view signin-view" id="signinView" hidden>
+    <section class="signin-hero">
+      <div class="signin-logo" data-logo data-animated aria-hidden="true"></div>
+      <h1>Sign in this ambulance</h1>
+      <p>Each ambulance has its own GoldenHour login. Enter the sign-in code your GoldenHour administrator gave for this vehicle. You do this once on this phone.</p>
+    </section>
+    <form class="card signin-form" id="signinForm" novalidate>
+      <label class="field-label" for="signinCode">Sign-in code</label>
+      <input type="text" id="signinCode" class="input input-mono signin-code" placeholder="7K3Q-PX9M-2DHT-W4RB" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="24" inputmode="text">
+      <p class="hint">16 letters and digits. Capitals and dashes do not matter.</p>
+      <p class="form-error" id="signinError" role="alert" hidden></p>
+      <button type="submit" class="btn-primary" id="signinBtn"><svg class="i" aria-hidden="true"><use href="#i-shield-check"/></svg><span>Sign in this ambulance</span></button>
+      <p class="hint">This phone reports its model, Android version, app version and battery to your administrator, so they know which phone rides in which ambulance.</p>
+    </form>
+  </main>
 
   <!-- ═══ HOME ═════════════════════════════════════════════════════════ -->
   <main class="scroll view" id="homeView">
@@ -125,6 +142,20 @@
         </div>
       </div>
       <p class="active-facility"><svg class="i" aria-hidden="true"><use href="#i-hospital"/></svg><span>Hospital: <b id="activeFacility">—</b></span></p>
+      <div class="nav-card" id="navCard" hidden>
+        <div class="nav-next" id="navNext" role="status" aria-live="polite">
+          <span class="nav-turn" id="navTurnIcon" aria-hidden="true"><svg class="i"><use href="#i-navigation"/></svg></span>
+          <span class="nav-next-text"><b id="navNextDist">—</b><span id="navNextText">Finding the route to the hospital…</span></span>
+        </div>
+        <div class="nav-map" id="navMap" role="region" aria-label="Map: your position, the route and the hospital"></div>
+        <div class="nav-stats">
+          <div><span>Remaining</span><b id="navRemain">—</b></div>
+          <div><span>ETA</span><b id="navEta">—</b></div>
+          <div><span>Arrive by</span><b id="navArrive">—</b></div>
+        </div>
+        <details class="nav-steps" id="navStepsBox"><summary>All directions</summary><ol id="navSteps"></ol></details>
+        <p class="hint" id="navNote"></p>
+      </div>
       <div class="active-grid">
         <div class="active-fact"><span>Case</span><b id="activePatientName">—</b></div>
         <div class="active-fact"><span>Patient</span><b id="activeAgeBand">—</b></div>
@@ -463,9 +494,47 @@
   <main class="scroll view" id="settingsView" hidden>
     <section class="card">
       <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-ambulance"/></svg></span>This vehicle</h2></div>
-      <label class="field-label" for="ambulanceId">Ambulance unit ID</label>
-      <input type="text" id="ambulanceId" class="input input-mono" placeholder="KA01AB1234" autocomplete="off" spellcheck="false">
-      <p class="hint">Stored on this device and sent with every case, so the ER knows which unit is arriving.</p>
+      <div id="unitSigned" hidden>
+        <div class="unit-head"><b class="unit-reg" id="unitReg">—</b><span class="tag tag-brand" id="unitType">—</span></div>
+        <p class="unit-name" id="unitName">—</p>
+        <div class="setting-list">
+          <div class="setting-row"><span class="setting-label">Operator</span><b class="setting-value" id="unitOperator">—</b></div>
+          <div class="setting-row"><span class="setting-label">Base</span><b class="setting-value" id="unitBase">—</b></div>
+          <div class="setting-row"><span class="setting-label">Signed in on this phone</span><b class="setting-value" id="unitSince">—</b></div>
+        </div>
+        <button type="button" class="btn-ghost" id="unitSignOutBtn">Sign this phone out</button>
+        <p class="hint">Signing out needs a new code from your administrator to sign in again.</p>
+      </div>
+      <div id="unitManual">
+        <label class="field-label" for="ambulanceId">Ambulance unit ID</label>
+        <input type="text" id="ambulanceId" class="input input-mono" placeholder="KA01AB1234" autocomplete="off" spellcheck="false">
+        <p class="hint">Demo mode: stored on this device only. In live use the ambulance signs in with its own code.</p>
+      </div>
+    </section>
+
+    <section class="card" id="crewCard" hidden>
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-shield-check"/></svg></span>Crew on shift</h2></div>
+      <p class="card-sub">Who is in this ambulance now. Your administrator sees it; the ER sees the vehicle.</p>
+      <ul class="crew-list" id="crewList"></ul>
+      <div class="crew-add">
+        <input type="text" id="crewName" class="input" placeholder="Name" aria-label="Crew member's name" maxlength="60" autocomplete="off">
+        <div class="seg seg-wrap crew-roles" id="crewRoleSeg" role="radiogroup" aria-label="Role">
+          <button type="button" class="seg-btn" data-value="Driver" role="radio" aria-checked="false">Driver</button>
+          <button type="button" class="seg-btn" data-value="EMT" role="radio" aria-checked="false">EMT</button>
+          <button type="button" class="seg-btn is-on" data-value="Paramedic" role="radio" aria-checked="true">Paramedic</button>
+          <button type="button" class="seg-btn" data-value="Nurse" role="radio" aria-checked="false">Nurse</button>
+          <button type="button" class="seg-btn" data-value="Doctor" role="radio" aria-checked="false">Doctor</button>
+        </div>
+        <input type="tel" id="crewPhone" class="input" placeholder="Phone (optional)" aria-label="Crew member's phone (optional)" maxlength="20" autocomplete="off">
+        <button type="button" class="btn-secondary" id="crewAddBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg><span>Add</span></button>
+      </div>
+      <p class="form-error" id="crewError" role="alert" hidden></p>
+    </section>
+
+    <section class="card" id="deviceCard" hidden>
+      <div class="card-head"><h2><span class="head-icon" aria-hidden="true"><svg class="i"><use href="#i-monitor"/></svg></span>This phone</h2></div>
+      <div class="setting-list" id="deviceList"></div>
+      <p class="hint">Reported to your GoldenHour administrator when you sign in and every few minutes while the app is open.</p>
     </section>
 
     <section class="card">
@@ -724,6 +793,7 @@
 <div id="toast" class="toast" hidden role="status"></div>
 
 <script src="config.js"></script>
+<script src="logo.js"></script>
 <script src="vendor/socket.io.min.js"></script>
 <script type="module" src="./main.js"></script>
 <script src="ui.js"></script>

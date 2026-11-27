@@ -8,7 +8,10 @@
 (function () {
   'use strict';
   var GH = window.GH, $ = GH.$, $$ = GH.$$, esc = GH.esc;
-  var me = null, picked = null, timers = [], bound = false, statesLoaded = false;
+  var me = null, picked = null, timers = [], bound = false, statesLoaded = false, lastActivity = Date.now();
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) {
+    document.addEventListener(ev, function () { lastActivity = Date.now(); }, { passive: true, capture: true });
+  });
 
   var STATE = {
     PENDING: ['Pending activation', 'status-pending'],
@@ -345,6 +348,109 @@
   }
   function loadKpis() {
     GH.api('/admin/live').then(function (b) { paintLiveKpis(b.cases || []); }).catch(function () {});
+    GH.api('/admin/ambulances').then(function (b) { kpi('ambulances', (b.ambulances || []).filter(function (a) { return a.state === 'ACTIVE'; }).length); }).catch(function () {});
+  }
+
+  /* ── ambulances ──────────────────────────────────────────────────────────
+     One login per vehicle: register it, hand its one-time code to the crew,
+     and see the phone the app is installed on and the crew on shift. */
+  var ambEditing = null, ambData = [];
+  var AMB_STATE = {
+    WAITING: ['Waiting for sign-in', 'status-pending'], CODE_EXPIRED: ['Sign-in code expired', 'status-change'],
+    SIGNED_OUT: ['Signed out — needs a new code', 'status-change'], DISABLED: ['Switched off', 'status-disabled'], ACTIVE: ['Signed in', 'status-active'],
+  };
+  function ambStatus(a) {
+    var st = AMB_STATE[a.state] || AMB_STATE.ACTIVE;
+    var sub = '';
+    if (a.state === 'ACTIVE') sub = (a.online ? '<span class="amb-dot is-on" aria-hidden="true"></span>Online' : '<span class="amb-dot" aria-hidden="true"></span>Offline') + (a.last_seen_at ? ' · seen ' + esc(GH.ago(a.last_seen_at)) : '');
+    else if (a.state === 'WAITING' && a.code_expires_at) sub = 'Code valid until ' + esc(GH.dateTime(a.code_expires_at));
+    return '<span class="status ' + st[1] + '">' + esc(st[0]) + '</span>' + (sub ? '<div class="sub">' + sub + '</div>' : '');
+  }
+  function ambDevice(a) {
+    var d = a.device;
+    if (!d || a.state === 'WAITING' || a.state === 'SIGNED_OUT' || a.state === 'CODE_EXPIRED') return '<span class="sub">No phone signed in</span>';
+    var name = [d.manufacturer, d.model].filter(Boolean).join(' ') || (d.platform === 'web' ? 'Web browser' : 'Phone');
+    var line1 = [d.os ? d.os + (d.os_version ? ' ' + d.os_version : '') : null, d.platform === 'android' ? 'Android app' : (d.platform === 'web' ? 'Browser' : d.platform), d.app_version ? 'App ' + d.app_version : null].filter(Boolean).join(' · ');
+    var line2 = [d.battery_pct != null ? 'Battery ' + Math.round(d.battery_pct) + '%' + (d.charging ? ' (charging)' : '') : null, d.network ? d.network.toUpperCase() : null,
+      d.location_permission ? 'Location ' + d.location_permission : null].filter(Boolean).join(' · ');
+    var line3 = [d.screen ? 'Screen ' + d.screen : null, d.memory_gb ? d.memory_gb + ' GB RAM' : null, d.cpu_cores ? d.cpu_cores + ' cores' : null].filter(Boolean).join(' · ');
+    return '<b>' + esc(name) + '</b><div class="sub">' + esc(line1) + '</div>' + (line2 ? '<div class="sub">' + esc(line2) + '</div>' : '') +
+      (line3 ? '<div class="sub">' + esc(line3) + '</div>' : '') +
+      '<div class="sub">Signed in ' + esc(GH.dateTime(a.paired_at)) + (d.installation_id ? ' · install ' + esc(String(d.installation_id).slice(0, 8)) : '') + '</div>';
+  }
+  function ambCrew(a) {
+    if (!a.crew || !a.crew.length) return '<span class="sub">Not entered yet — the crew adds it in the app</span>';
+    return '<ul class="amb-crew">' + a.crew.map(function (m) {
+      return '<li><b>' + esc(m.name) + '</b> <span class="amb-role">' + esc(m.role) + '</span>' + (m.phone ? '<div class="sub"><a href="tel:' + esc(m.phone.replace(/[^+0-9]/g, '')) + '">' + esc(m.phone) + '</a></div>' : '') + '</li>';
+    }).join('') + '</ul>' + (a.crew_updated_at ? '<div class="sub">Updated ' + esc(GH.ago(a.crew_updated_at)) + '</div>' : '');
+  }
+  function ambNow(a) {
+    var c = a.current_case;
+    if (!c) return '<span class="sub">No open case</span>';
+    return '<span class="mono">' + esc(c.case_code) + '</span> <span class="status ' + (c.status === 'ACCEPTED' ? 'status-active' : 'status-pending') + '">' + (c.status === 'ACCEPTED' ? 'En route' : 'Waiting') + '</span>' +
+      '<div class="sub">' + esc(c.chief_complaint || '') + '</div>' +
+      (c.hospital ? '<div class="sub">→ ' + esc(c.hospital) + (c.remaining_distance_km != null ? ' · ' + esc(GH.km(c.remaining_distance_km)) : '') + '</div>' : '');
+  }
+  function loadAmbulances() {
+    GH.api('/admin/ambulances').then(function (b) {
+      ambData = b.ambulances || [];
+      kpi('ambulances', ambData.filter(function (a) { return a.state === 'ACTIVE'; }).length);
+      $('#ambRows').innerHTML = ambData.map(function (a) {
+        var off = a.state === 'DISABLED';
+        return '<tr' + (off ? ' class="is-off"' : '') + '><td><b class="mono amb-reg">' + esc(a.registration) + '</b><div>' + esc(a.unit_name || '') + '</div>' +
+          '<div class="sub">' + esc([a.operator, a.vehicle_type, a.base_location].filter(Boolean).join(' · ')) + '</div>' + (a.phone ? '<div class="sub">' + esc(a.phone) + '</div>' : '') + '</td>' +
+          '<td>' + ambStatus(a) + '</td><td>' + ambDevice(a) + '</td><td>' + ambCrew(a) + '</td><td>' + ambNow(a) + '</td>' +
+          '<td class="actions"><button type="button" class="c-btn-link" data-amb="code" data-id="' + a.ambulance_id + '">' + (a.state === 'ACTIVE' ? 'Sign in a new phone' : 'New sign-in code') + '</button>' +
+          '<button type="button" class="c-btn-link" data-amb="edit" data-id="' + a.ambulance_id + '">Edit</button>' +
+          '<button type="button" class="c-btn-link' + (off ? '' : ' danger') + '" data-amb="' + (off ? 'enable' : 'disable') + '" data-id="' + a.ambulance_id + '">' + (off ? 'Switch on' : 'Switch off') + '</button></td></tr>';
+      }).join('') || '<tr><td colspan="6" class="table-empty">No ambulances yet. Register the first one above.</td></tr>';
+    }).catch(function (e) { $('#ambRows').innerHTML = '<tr><td colspan="6" class="table-empty">' + esc(e.message) + '</td></tr>'; });
+  }
+  function ambShowCode(b, again) {
+    $('#ambSecret').hidden = false;
+    $('#ambSecretTitle').textContent = 'Sign-in code for ' + b.ambulance.registration;
+    $('#ambSecretCode').textContent = b.sign_in_code;
+    $('#ambSecretHint').textContent = 'Give this code to the crew of ' + b.ambulance.registration + '. On the phone that rides in the ambulance, open the GoldenHour app and enter it once. ' +
+      'It works once and expires ' + GH.dateTime(b.expires_at) + '. It is shown only now.' + (again ? ' The phone signed in before has been signed out.' : '');
+    $('#ambSecret').scrollIntoView && $('#ambSecret').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  function ambFormReset() {
+    ambEditing = null;
+    ['ambReg', 'ambUnit', 'ambOperator', 'ambBase', 'ambPhone'].forEach(function (id) { $('#' + id).value = ''; });
+    $('#ambType').value = '';
+    $('#ambFormTitle').textContent = 'Register an ambulance';
+    $('#ambSubmit').textContent = 'Register and get a sign-in code';
+    $('#ambCancelEdit').hidden = true; $('#ambError').hidden = true;
+  }
+  function ambSubmit(e) {
+    e.preventDefault();
+    var body = { registration: $('#ambReg').value, unit_name: $('#ambUnit').value, operator: $('#ambOperator').value,
+      vehicle_type: $('#ambType').value, base_location: $('#ambBase').value, phone: $('#ambPhone').value };
+    var btn = $('#ambSubmit'); btn.disabled = true; $('#ambError').hidden = true;
+    var req = ambEditing ? GH.api('/admin/ambulances/' + ambEditing, { method: 'PUT', body: body }) : GH.api('/admin/ambulances', { method: 'POST', body: body });
+    req.then(function (b) {
+      if (b.sign_in_code) ambShowCode(b, false); else GH.toast('Saved');
+      ambFormReset(); loadAmbulances();
+    }).catch(function (err) { $('#ambError').textContent = err.message; $('#ambError').hidden = false; })
+      .then(function () { btn.disabled = false; });
+  }
+  function ambAction(id, act, btn) {
+    var a = ambData.filter(function (x) { return String(x.ambulance_id) === String(id); })[0];
+    if (!a) return;
+    if (act === 'edit') {
+      ambEditing = a.ambulance_id;
+      $('#ambReg').value = a.registration; $('#ambUnit').value = a.unit_name || ''; $('#ambOperator').value = a.operator || '';
+      $('#ambType').value = a.vehicle_type || ''; $('#ambBase').value = a.base_location || ''; $('#ambPhone').value = a.phone || '';
+      $('#ambFormTitle').textContent = 'Edit ' + a.registration; $('#ambSubmit').textContent = 'Save changes'; $('#ambCancelEdit').hidden = false;
+      $('#ambReg').focus(); return;
+    }
+    if (act === 'code' && a.state === 'ACTIVE' && !window.confirm('Issue a new sign-in code for ' + a.registration + '?\n\nThe phone signed in now will be signed out.')) return;
+    if (act === 'disable' && !window.confirm('Switch off ' + a.registration + '?\n\nIts phone is signed out and it cannot send cases until switched on again.')) return;
+    btn.disabled = true;
+    GH.api('/admin/ambulances/' + id + '/' + act, { method: 'POST', body: {} }).then(function (b) {
+      if (act === 'code') ambShowCode(b, a.state === 'ACTIVE'); else GH.toast(act === 'disable' ? a.registration + ' switched off' : a.registration + ' switched on');
+      loadAmbulances();
+    }).catch(function (err) { GH.toast(err.message); btn.disabled = false; });
   }
 
   function loadCoverage() {
@@ -383,6 +489,7 @@
     if (tab === 'accounts') loadAccounts();
     if (tab === 'directory') { loadDirectory(); loadCatalogue(); }
     if (tab === 'live') loadLive();
+    if (tab === 'ambulances') loadAmbulances();
     if (tab === 'audit') loadAudit();
   }
 
@@ -425,6 +532,14 @@
     $('#catState').addEventListener('change', loadCatalogue);
     $('#catRows').addEventListener('click', function (e) { var b = e.target.closest('[data-add]'); if (b) addHospital(b.dataset.add, b); });
     $('#liveRefresh').addEventListener('click', loadLive);
+    $('#ambRefresh').addEventListener('click', loadAmbulances);
+    $('#ambForm').addEventListener('submit', ambSubmit);
+    $('#ambCancelEdit').addEventListener('click', ambFormReset);
+    $('#ambRows').addEventListener('click', function (e) { var b = e.target.closest('[data-amb]'); if (b) ambAction(b.dataset.id, b.dataset.amb, b); });
+    $('#ambCopy').addEventListener('click', function () {
+      var t = $('#ambSecretCode').textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { GH.toast('Copied'); }, function () { GH.toast('Copy failed — select it by hand'); });
+    });
     $('#auditRefresh').addEventListener('click', loadAudit);
     $('#adminSignOut').addEventListener('click', function () { window.GHSignOut(); });
     document.addEventListener('click', function (e) { if (!e.target.closest('.picker')) $('#createPicker').hidden = true; });
@@ -437,8 +552,17 @@
     syncMode();
     $('#adminName').textContent = account.username;
     loadStates(); loadCoverage(); loadKpis(); showTab('accounts');
-    timers.push(setInterval(function () { loadKpis(); loadCoverage(); }, 15000));
+    timers.push(setInterval(function () { loadKpis(); loadCoverage(); if (!$('[data-pane="ambulances"]').hidden) loadAmbulances(); }, 15000));
     timers.push(setInterval(function () { if (!$('[data-pane="live"]').hidden) loadLive(); }, 10000));
+    /* Idle sign-out: the console controls every login, so it does not stay
+       open on an unattended screen. */
+    var idleMs = Math.max(1, Number((GH.cfg || {}).ADMIN_IDLE_MINUTES) || 30) * 60000;
+    lastActivity = Date.now();
+    timers.push(setInterval(function () {
+      if (me && Date.now() - lastActivity > idleMs) {
+        GH.expire('You were signed out after ' + Math.round(idleMs / 60000) + ' minutes without activity. Sign in again.');
+      }
+    }, 15000));
   }
   function stop() {
     timers.forEach(clearInterval); timers = []; me = null;

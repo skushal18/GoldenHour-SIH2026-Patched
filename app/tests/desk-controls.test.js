@@ -20,7 +20,7 @@ function boot(opts) {
   w.print = () => {};
   w.setInterval = fn => { intervals.push(fn); return intervals.length; };
   w.clearInterval = () => {};
-  if (opts.session) w.localStorage.setItem('goldenhour.session', JSON.stringify(opts.session));
+  if (opts.session) w.localStorage.setItem('goldenhour.session', JSON.stringify(Object.assign({ seen: Date.now() }, opts.session)));
   w.io = () => {
     const h = {};
     const sock = { connected: true, on: (ev, fn) => { h[ev] = fn; }, emit() {}, disconnect() { sock.connected = false; }, _h: h };
@@ -241,6 +241,31 @@ const card = () => ({ case_code: 'GH-TEST', status: 'ACCEPTED', priority: 'RED',
     assert.ok(text.includes('location off, or the app closed'), text);
     assert.ok(t.$('#hereNote').textContent.includes('hospital address'), 'no geolocation here: the address is used, and said so');
     ok('no GPS yet: the desk says how far the case was sent from, and after a minute why it may be missing');
+    t.dom.window.close();
+  }
+
+
+  /* ── 7. Leaving the site ends the session ──────────────────────────── */
+  {
+    let called = 0;
+    const t = boot({ session: { token: 'OLD', username: 'er.test', seen: Date.now() - 6 * 60000 }, route: () => { called++; return { body: STAFF }; } });
+    await delay(30);
+    assert.strictEqual(t.$('#viewLogin').hidden, false, 'a session left for 6 minutes opens the sign-in form');
+    assert.ok(/closed for more than 5 minutes/.test(t.$('#loginError').textContent), t.$('#loginError').textContent);
+    assert.strictEqual(t.w.localStorage.getItem('goldenhour.session'), null);
+    assert.strictEqual(called, 0, 'and nothing is asked of the server with the old token');
+    ok('coming back after more than 5 minutes away asks for the password again, and says why');
+    t.dom.window.close();
+  }
+  {
+    const t = boot({ session: { token: 'NEW', username: 'er.test', seen: Date.now() - 60000 }, route: (u) => {
+      if (u === '/auth/me') return { body: STAFF };
+      if (u.startsWith('/desk/queue')) return { body: { pending: [], active: [] } };
+      return { body: {} };
+    } });
+    await delay(40);
+    assert.strictEqual(t.$('#viewBoard').hidden, false, 'back within a minute: still signed in');
+    ok('a reload or a quick return within the timeout keeps the desk signed in');
     t.dom.window.close();
   }
 

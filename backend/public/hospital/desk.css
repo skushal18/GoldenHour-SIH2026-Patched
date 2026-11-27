@@ -190,11 +190,11 @@ button { cursor: pointer; }
 .admin-side > * { animation: gh-rise .55s var(--ease) both .2s; }
 
 /* the network at a glance */
-.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
 .kpi { position: relative; overflow: hidden; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 14px; align-items: center;
   padding: 16px 18px; border-radius: 18px; background: #fff; border: 1px solid var(--c-line); box-shadow: var(--gh-shadow); animation: gh-rise .5s var(--ease) both;
   transition: transform .2s var(--ease), box-shadow .2s var(--ease); }
-.kpi:nth-child(2) { animation-delay: .06s; } .kpi:nth-child(3) { animation-delay: .12s; } .kpi:nth-child(4) { animation-delay: .18s; }
+.kpi:nth-child(2) { animation-delay: .06s; } .kpi:nth-child(3) { animation-delay: .12s; } .kpi:nth-child(4) { animation-delay: .18s; } .kpi:nth-child(5) { animation-delay: .24s; }
 .kpi:hover { transform: translateY(-2px); box-shadow: 0 1px 2px rgba(70, 35, 10, .06), 0 20px 40px -22px rgba(70, 35, 10, .45); }
 .kpi-ic { grid-row: 1 / 3; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: linear-gradient(135deg, #FFF1D2, #FFE0A8); color: #9A4A06; }
 .kpi-ic svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
@@ -205,7 +205,8 @@ button { cursor: pointer; }
 .kpi-hot > span:last-child { color: #EED7BF; }
 .kpi-hot.is-live .kpi-ic { animation: gh-pulse 1.8s ease-in-out infinite; }
 @keyframes gh-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 201, 92, .55); } 50% { box-shadow: 0 0 0 10px rgba(255, 201, 92, 0); } }
-@media (max-width: 1100px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1350px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .kpi b { font-size: 24px; } .kpi { padding: 12px 14px; } }
 
 .live-map-panel { padding: 0; overflow: hidden; }
@@ -590,3 +591,25 @@ button { cursor: pointer; }
 .mark.gh-mark, .deskbar .mark.gh-mark { background: #FFF8EC; color: inherit; }
 .mark.gh-mark svg { width: 100%; height: 100%; }
 .deskbar .mark.gh-mark { width: 38px; height: 38px; }
+
+/* ── admin: ambulances ──────────────────────────────────────────────────── */
+.amb-form-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.amb-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; }
+@media (max-width: 980px) { .amb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .amb-grid { grid-template-columns: 1fr; } }
+.amb-form .c-btn-primary { align-self: flex-start; }
+.amb-secret { border-color: #E9B65E; background: linear-gradient(120deg, #FFF4E0, #FFFFFF 70%); animation: gh-rise .4s var(--ease) both; }
+.amb-table { min-width: 920px; table-layout: auto; }
+.amb-table th:last-child, .amb-table td.actions { width: 150px; }
+.amb-table td { vertical-align: top; }
+.amb-table td .sub { margin-top: 2px; }
+.amb-reg { font-size: 15px; letter-spacing: .02em; color: #5A2A06; }
+.amb-crew { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.amb-role { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #FFF1D2; color: #7A3A08; margin-left: 4px; }
+.amb-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #B8A79A; margin-right: 6px; vertical-align: 1px; }
+.amb-dot.is-on { background: #1E8E3E; box-shadow: 0 0 0 0 rgba(30, 142, 62, .5); animation: gh-pulse-g 1.8s ease-in-out infinite; }
+@keyframes gh-pulse-g { 0%, 100% { box-shadow: 0 0 0 0 rgba(30, 142, 62, .5); } 50% { box-shadow: 0 0 0 6px rgba(30, 142, 62, 0); } }
+.amb-table tr.is-off td { opacity: .55; }
+.amb-table td.actions { white-space: normal; text-align: left; }
+.amb-table td.actions .c-btn-link { display: block; width: 100%; text-align: left; padding: 6px 0; min-height: 36px; }
+@media (prefers-reduced-motion: reduce) { .amb-dot.is-on { animation: none; } }
