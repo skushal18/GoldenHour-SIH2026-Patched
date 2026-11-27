@@ -14,6 +14,15 @@ const ROAD_FACTOR     = Number(process.env.TRACK_ETA_ROAD_FACTOR || 1.25);
 const STALL_KMH       = Number(process.env.TRACK_STALL_KMH || 5);
 const SPEED_MIN_KMH   = Number(process.env.TRACK_SPEED_MIN_KMH || 15);
 const SPEED_MAX_KMH   = Number(process.env.TRACK_SPEED_MAX_KMH || 80);
+/* A phone indoors, or a browser on Wi-Fi location, reports hundreds of metres
+   of uncertainty. Such a fix is still far better than no ambulance on the
+   map, so it is kept up to TRACK_MAX_ACCURACY_M — marked approximate, drawn
+   with its uncertainty, and never used to measure speed. */
+const PRECISE_M       = Number(process.env.TRACK_PRECISE_ACCURACY_M || 200);
+const MAX_ACCURACY_M  = Number(process.env.TRACK_MAX_ACCURACY_M || 2000);
+/* Until a speed has been measured, the ETA is an estimate at this speed (an
+   ambulance in city traffic), labelled as such. */
+const ASSUMED_KMH     = Number(process.env.TRACK_ASSUMED_KMH || 25);
 
 const haversine = (a, b, c, d) => {
   if ([a,b,c,d].some(v => v==null || v==='' || Number.isNaN(Number(v)))) return null;
@@ -31,16 +40,23 @@ function ensure(code){ if (!cases.has(code)) cases.set(code, { track: [] }); ret
 function append(caseCode, hospitalLat, hospitalLng, pos){
   const now = Date.now();
   if (!pos || !validCoordinate(pos.lat, 90) || !validCoordinate(pos.lng, 180)) return { error: 'INVALID_COORD' };
+  if (Number(pos.lat) === 0 && Number(pos.lng) === 0) return { error: 'INVALID_COORD' };
   const at = pos.at == null ? now : Date.parse(pos.at);
   if (!Number.isFinite(at) || at > now + 30000 || now - at > 120000) return { error: 'STALE_POSITION' };
-  if (pos.accuracy_m != null && (!Number.isFinite(Number(pos.accuracy_m)) || Number(pos.accuracy_m) < 0 || Number(pos.accuracy_m) > 200)) return { error: 'INACCURATE_POSITION' };
+  if (pos.accuracy_m != null && (!Number.isFinite(Number(pos.accuracy_m)) || Number(pos.accuracy_m) < 0 || Number(pos.accuracy_m) > MAX_ACCURACY_M)) return { error: 'INACCURATE_POSITION' };
   const rec = ensure(caseCode);
+  /* The same fix sent twice (socket, then the HTTP fallback after a lost
+     acknowledgement) is not an error: it is already recorded. */
+  if (rec.last_position && at === Date.parse(rec.last_position.at) &&
+      Number(pos.lat) === rec.last_position.lat && Number(pos.lng) === rec.last_position.lng) return { duplicate: true, record: rec, point: rec.last_position };
   if (rec.lastUpdateMs && (now - rec.lastUpdateMs) < MIN_INTERVAL_MS) return { throttled: true };
   if (rec.last_position && at <= Date.parse(rec.last_position.at)) return { error: 'OUT_OF_ORDER' };
+  const accuracy = pos.accuracy_m == null ? null : Number(pos.accuracy_m);
   const point = {
     lat: Number(pos.lat),
     lng: Number(pos.lng),
-    accuracy_m: pos.accuracy_m == null ? null : Number(pos.accuracy_m),
+    accuracy_m: accuracy,
+    approximate: accuracy != null && accuracy > PRECISE_M,
     speed_kmh: pos.speed_kmh == null ? null : Number(pos.speed_kmh),
     source: pos.source || 'gps',
     at: new Date(at).toISOString(),
@@ -49,10 +65,33 @@ function append(caseCode, hospitalLat, hospitalLng, pos){
   while (rec.track.length > MAX_POINTS) rec.track.shift();
   rec.last_position = point;
   rec.lastUpdateMs = now;
-  rec.distance_km = haversine(point.lat, point.lng, hospitalLat, hospitalLng);
+  derive(rec, hospitalLat, hospitalLng);
+  return { throttled: false, record: rec, point };
+}
+
+/* Distance, ETA and movement, from the track and the hospital end. */
+function derive(rec, hospitalLat, hospitalLng){
+  const point = rec.last_position;
+  rec.hospital = hospitalLat == null || hospitalLng == null ? null : { lat: Number(hospitalLat), lng: Number(hospitalLng) };
+  rec.distance_km = point ? haversine(point.lat, point.lng, hospitalLat, hospitalLng) : null;
   rec.live_eta_minutes = computeEta(rec.track, hospitalLat, hospitalLng);
   rec.eta_source = classify(rec.track, rec.live_eta_minutes);
-  return { throttled: false, record: rec, point };
+  rec.moving_kmh = recentSpeedKmh(rec.track);
+  rec.est_eta_minutes = estimateEta(rec.distance_km);
+}
+
+/** The hospital end moved (the desk reported a new location): recompute. */
+function retarget(caseCode, hospitalLat, hospitalLng){
+  const rec = cases.get(caseCode);
+  if (!rec || !rec.last_position) return null;
+  derive(rec, hospitalLat, hospitalLng);
+  return rec;
+}
+
+/** Minutes at the assumed city speed, along roads. Never below 1. */
+function estimateEta(km){
+  if (km == null || !Number.isFinite(km)) return null;
+  return Math.max(1, Math.round((km * ROAD_FACTOR / ASSUMED_KMH) * 60));
 }
 
 /** Milliseconds, or null when the timestamp is not a real instant. */
@@ -73,8 +112,9 @@ function timeOf(point){
  * not double the ETA.
  */
 function recentSpeedKmh(track){
-  if (!track || track.length < 2) return null;
-  const last = track.slice(-6);
+  const precise = (track || []).filter(p => !p.approximate);
+  if (precise.length < 2) return null;
+  const last = precise.slice(-6);
   const speeds = [];
   for (let i=1;i<last.length;i++){
     const a = last[i-1], b = last[i];
@@ -102,7 +142,7 @@ function spanSeconds(points){
 
 function computeEta(track, hopLat, hopLng){
   if (hopLat == null || hopLng == null) return null;
-  if (!track || track.length < 3) return null;
+  if (!track || track.filter(p => !p.approximate).length < 3) return null;
   const measured = recentSpeedKmh(track);
   if (measured === null || !Number.isFinite(measured)) return null;
   const last = track[track.length - 1];
@@ -119,7 +159,7 @@ function computeEta(track, hopLat, hopLng){
 }
 
 function classify(track, etaMin){
-  if (!track || track.length < 3) return 'crew';
+  if (!track || track.filter(p => !p.approximate).length < 3) return 'crew';
   const speed = recentSpeedKmh(track);
   if (speed === null) return etaMin != null ? 'live' : 'crew';
 
@@ -140,12 +180,16 @@ function validCoordinate(value, limit){
 // Read-time freshness is essential: a disconnected ambulance emits no event.
 function snapshot(caseCode, now = Date.now()){
   const rec = cases.get(caseCode);
-  if (!rec || !rec.last_position) return { last_position: null, track: [], live_eta_minutes: null, eta_source: 'crew', distance_km: null };
+  if (!rec || !rec.last_position) return { last_position: null, track: [], live_eta_minutes: null, eta_source: 'crew', distance_km: null,
+    est_eta_minutes: null, moving_kmh: null, hospital: null };
   const stale = now - Date.parse(rec.last_position.at) > 30000;
   const etaUsable = !stale && rec.eta_source === 'live';
   return { last_position: rec.last_position, track: rec.track.slice(),
     live_eta_minutes: etaUsable ? rec.live_eta_minutes : null,
-    eta_source: stale ? 'stale' : rec.eta_source, distance_km: rec.distance_km };
+    eta_source: stale ? 'stale' : rec.eta_source, distance_km: rec.distance_km,
+    est_eta_minutes: rec.est_eta_minutes == null ? null : rec.est_eta_minutes,
+    moving_kmh: rec.moving_kmh == null ? null : Math.round(rec.moving_kmh),
+    hospital: rec.hospital || null };
 }
 
 function get(caseCode){
@@ -163,4 +207,4 @@ function drop(caseCode){
   return aggregate;
 }
 
-module.exports = { snapshot, haversine, append, get, drop, recentSpeedKmh, computeEta, classify, spanSeconds };
+module.exports = { snapshot, haversine, append, retarget, get, drop, recentSpeedKmh, computeEta, estimateEta, classify, spanSeconds, PRECISE_M, MAX_ACCURACY_M };

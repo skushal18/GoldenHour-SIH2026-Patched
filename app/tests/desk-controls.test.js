@@ -34,6 +34,7 @@ function boot(opts) {
     const status = r.status || 200;
     return { ok: status < 400, status, json: async () => r.body || {} };
   };
+  if (opts.before) opts.before(w);
   SCRIPTS.forEach(f => w.eval(fs.readFileSync(path.join(root, f), 'utf8')));
   return { dom, w, calls, intervals, $: s => w.document.querySelector(s) };
 }
@@ -164,6 +165,82 @@ const card = () => ({ case_code: 'GH-TEST', status: 'ACCEPTED', priority: 'RED',
     assert.strictEqual(t.$('#viewPassword').hidden, false);
     assert.strictEqual(t.$('#viewBoard').hidden, true);
     ok('a temporary password leads to the change-password screen first');
+    t.dom.window.close();
+  }
+
+
+  /* ── 6. Live map: desk location, tiles, the live statement ─────────── */
+  {
+    const tiles = [];
+    const chain = o => Object.assign(o, { addTo() { return o; }, bindTooltip() { return o; }, setLatLng() { return o; }, setIcon() { return o; }, setLatLngs() { return o; }, setRadius() { return o; } });
+    const fakeL = {
+      map: () => chain({ on() {}, setView() {}, invalidateSize() {}, fitBounds() {}, removeLayer() {}, remove() {},
+        getBounds: () => ({ pad: () => ({ contains: () => true }) }) }),
+      tileLayer: (url, o) => { tiles.push({ url, o }); return chain({}); },
+      polyline: () => chain({}), marker: () => chain({}), circle: () => chain({}), divIcon: o => o,
+      latLngBounds: () => ({ pad: () => ({}) }), layerGroup: () => chain({ clearLayers() {} }),
+    };
+    const puts = [];
+    const fresh = () => new Date(Date.now() - 4000).toISOString();
+    const enRoute = Object.assign(card(), { notes: '', origin: { lat: 12.9166, lng: 77.605, source: 'gps', accuracy_m: 15 },
+      last_position: { lat: 12.9172, lng: 77.607, at: fresh(), accuracy_m: 10, approximate: false },
+      track: [{ lat: 12.9172, lng: 77.607, at: fresh() }], remaining_distance_km: 2.1, est_eta_minutes: 7, moving_kmh: 34, eta_source: 'crew',
+      tracking_hospital: { lat: 12.93035, lng: 77.61905, source: 'desk', accuracy_m: 35 } });
+    const t = boot({ session: { token: 'T6', username: 'er.test' },
+      before: w => {
+        w.L = fakeL;
+        Object.defineProperty(w.navigator, 'geolocation', { configurable: true, value: {
+          watchPosition: (ok) => { setTimeout(() => ok({ coords: { latitude: 12.93035, longitude: 77.61905, accuracy: 35 } }), 5); return 7; },
+          clearWatch() {} } });
+      },
+      route: (u, init) => {
+        if (u === '/auth/me') return { body: STAFF };
+        if (u.startsWith('/desk/queue')) return { body: { pending: [], active: [enRoute] } };
+        if (u === '/desk/location') { puts.push(JSON.parse(init.body)); return { body: { success: true, location: { lat: 12.93035, lng: 77.61905, source: 'desk', accuracy_m: 35 } } }; }
+        return { body: {} };
+      } });
+    await delay(60);
+    assert.strictEqual(puts.length, 1, 'the desk reports its own location once on start');
+    assert.deepStrictEqual(puts[0], { lat: 12.93035, lng: 77.61905, accuracy_m: 35 });
+    assert.ok(t.$('#hereNote').textContent.includes('this screen'), t.$('#hereNote').textContent);
+    ok('the desk reports the location of its own screen and says the map uses it');
+
+    assert.ok(tiles.length >= 1);
+    assert.ok(tiles.every(x => x.o.referrerPolicy === 'strict-origin-when-cross-origin'), 'every tile layer sends a referrer');
+    ok('map tiles are requested with a referrer, so OpenStreetMap does not block them');
+
+    const line = () => t.$('.case-active .live-line').textContent;
+    assert.ok(/2\.1 km away · about 7 min \(estimate at city speed\) · 34 km\/h · updated/.test(line()), line());
+    ok('the live statement gives distance, ETA (and which kind), speed and freshness');
+
+    t.w.__sock._h['case:position']({ case_code: 'GH-TEST', lat: 12.9262, lng: 77.6183, at: new Date().toISOString(), accuracy_m: 9,
+      distance_km: 0.6, live_eta_minutes: 2, eta_source: 'live', est_eta_minutes: 2, moving_kmh: 30 });
+    await delay();
+    assert.ok(/^Arriving in about 2 min — 600 m away\. Get ready/.test(line()), line());
+    assert.ok(t.$('.case.is-arriving'), 'the card is highlighted');
+    assert.ok(t.$('#toast').textContent.includes('Arriving'), 'and announced');
+    ok('an ambulance 2 minutes out is announced: banner, highlight, toast');
+
+    t.w.__sock._h['case:position']({ case_code: 'GH-TEST', lat: 12.9264, lng: 77.6183, at: new Date(Date.now() - 95000).toISOString(), accuracy_m: 700, approximate: true,
+      distance_km: 0.58, live_eta_minutes: null, eta_source: 'crew', est_eta_minutes: 2 });
+    await delay();
+    for (const fn of t.intervals) await fn();
+    assert.ok(/^No location update for 2 min\. Last seen 580 m away\. Position approximate \(±700 m\)/.test(line()), line());
+    ok('a silent ambulance is called out as stale, and a rough fix as approximate');
+    t.dom.window.close();
+  }
+  {
+    const t = boot({ session: { token: 'T7', username: 'er.test' }, route: (u) => {
+      if (u === '/auth/me') return { body: STAFF };
+      if (u.startsWith('/desk/queue')) return { body: { pending: [], active: [Object.assign(card(), { notes: '', origin: { lat: 12.9166, lng: 77.605 }, accepted_at: new Date(Date.now() - 120000).toISOString() })] } };
+      return { body: {} };
+    } });
+    await delay(40);
+    const text = t.$('.case-active .live-line').textContent;
+    assert.ok(/^Waiting for the ambulance’s GPS\. The case was sent from 2\.2 km away — about 8 min \(crew’s estimate\)/.test(text), text);
+    assert.ok(text.includes('location off, or the app closed'), text);
+    assert.ok(t.$('#hereNote').textContent.includes('hospital address'), 'no geolocation here: the address is used, and said so');
+    ok('no GPS yet: the desk says how far the case was sent from, and after a minute why it may be missing');
     t.dom.window.close();
   }
 

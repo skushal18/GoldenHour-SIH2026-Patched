@@ -8,7 +8,8 @@ const hospitalsConfig = require('../config/hospitals');
 const { deskGuard, deskAuthMode } = require('../middleware/hospitalIdentity');
 const { getStore, getAccounts } = require('../store');
 const directory = require('../services/directoryService');
-const { acceptBroadcast, declineBroadcast, markArrived, toDashboardCard } = require('../services/broadcastService');
+const { acceptBroadcast, declineBroadcast, markArrived, toDashboardCard, hospitalEnd, retargetHospital } = require('../services/broadcastService');
+const deskLocation = require('../services/deskLocationService');
 const capacity = require('../services/capacityService');
 const tracking = require('../services/trackingService');
 const audit = require('../services/auditService');
@@ -20,7 +21,20 @@ router.get('/me', (req, res) => {
   res.json({ hospital: req.hospital, matched_by: req.hospitalMatchedBy, client_ip: req.clientIp,
     hackathon_mode: hospitalsConfig.HACKATHON_MODE,
     accept_window_seconds: hospitalsConfig.ACCEPT_WINDOW_SECONDS,
-    auth_mode: deskAuthMode(), capacity: c });
+    auth_mode: deskAuthMode(), capacity: c, location: deskLocation.effective(req.hospital.hospital_id) });
+});
+
+/* The location of the screen this desk runs on — the hospital end of the
+   live map and of every ETA to this hospital (see deskLocationService for
+   when it is not used). Reported on every desk start and when it moves. */
+router.put('/location', async (req, res, next) => {
+  try {
+    const r = deskLocation.report(req.hospital.hospital_id, req.body || {});
+    if (!r.ok) return res.status(400).json({ success: false, reason: r.error, message: r.message });
+    const moved = await retargetHospital(req.hospital.hospital_id);
+    res.json({ success: true, location: r.location, live_cases_updated: moved,
+      limits: { max_accuracy_m: deskLocation.MAX_ACCURACY_M, max_drift_km: deskLocation.MAX_DRIFT_KM } });
+  } catch (err) { next(err); }
 });
 
 // Identity comes from deskGuard, never the submitted hospital_id.
@@ -115,7 +129,8 @@ router.get('/track/:caseCode', async (req, res) => {
       last_position: t.last_position || null,
       remaining_distance_km: t.distance_km == null ? null : t.distance_km,
       live_eta_minutes: t.live_eta_minutes || null, eta_source: t.eta_source || 'crew',
-      hospital: winner ? { lat: winner.lat, lng: winner.lng, name: winner.name, distance_km: winner.distance_km } : null });
+      est_eta_minutes: t.est_eta_minutes == null ? null : t.est_eta_minutes, moving_kmh: t.moving_kmh == null ? null : t.moving_kmh,
+      hospital: winner ? Object.assign({ name: winner.name, distance_km: winner.distance_km }, hospitalEnd(record) || { lat: winner.lat, lng: winner.lng }) : null });
   }catch(e){ res.status(500).json({ success:false }); }
 });
 

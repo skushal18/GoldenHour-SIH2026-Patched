@@ -10,6 +10,14 @@ An ambulance crew broadcasts a case once. Hospitals on GoldenHour see it on thei
 - **Hospitals live in the database.** The `hospitals` table is the GoldenHour network that ambulances are matched against; it starts with 100 emergency hospitals in six cities ([`data/hospitals/network_hospitals.csv`](data/hospitals/network_hospitals.csv), loaded by an idempotent seed). The 29,844-row national CSV stays as the list the administrator adds hospitals from.
 - **Each hospital chooses its own login.** The built-in logins are gone (and retired wherever they still existed). The administrator creates logins for every hospital at once with one-time activation codes (hashed, single use, 7-day expiry, downloaded once as a CSV); each hospital activates at `/hospital/#activate` and picks its own username and password.
 
+## Live map
+
+- **Map tiles work on the live site.** The pages send `Referrer-Policy: no-referrer`, and OpenStreetMap answers referer-less tile requests with an "Access blocked" tile. Tile requests alone now send the site's origin (`MAP_TILE_REFERRER_POLICY` in `backend/public/hospital/config.js`).
+- **The ER desk's own location is the hospital end.** Each desk reports its screen's location when it opens (`PUT /api/v1/desk/location`); distance and ETA run to it. A fix rougher than 1 km, over 50 km from the hospital's address, or older than 12 h is not used — the directory address is, and the desk header says why.
+- **Crew GPS gets through.** The app sends rough fixes (up to ±2 km, marked approximate) instead of dropping them, and falls back to `POST /api/v1/requests/:code/position` (crew token) when the socket is down.
+- **A live statement on every case.** "1.9 km away · about 4 min (live GPS) · 37 km/h · updated 10 s ago", stale and stopped warnings, and an *arriving* banner, chime and highlight once an ambulance is 3 minutes or 1 km out. Incoming cases show where they were sent from on a map.
+- **Network map in the admin console** (Live cases): ambulances en route, their destinations, cases waiting for a hospital, and every hospital that can receive cases. Refreshes every 10 s.
+
 ## What was new in v6
 
 - **Central hospital sign-in.** One server, one account database. Each hospital has its own username and password, and signing in opens that hospital's ER desk only — its identity comes from the login, never from the URL, a header or the IP address.

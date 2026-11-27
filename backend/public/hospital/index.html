@@ -126,7 +126,7 @@
 <div id="viewBoard" hidden>
   <header class="deskbar glass">
     <div class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>GoldenHour <small>ER desk</small></div>
-    <div class="who-hosp"><b id="hospName">—</b><span id="hospMeta"></span></div>
+    <div class="who-hosp"><b id="hospName">—</b><span id="hospMeta"></span><span id="hereNote" class="here-note" role="status"></span></div>
     <div class="spacer"></div>
     <span id="livePill" class="live-pill is-down" role="status"><i aria-hidden="true"></i><span id="liveText">Connecting…</span></span>
     <button id="divertBtn" type="button" class="g-btn g-btn-divert" aria-pressed="false">Go on diversion</button>
@@ -257,8 +257,18 @@
 
       <!-- live -->
       <section data-pane="live" hidden>
-        <div class="admin-head"><div class="title"><h1>Live cases</h1><p>The last 100 broadcasts across the network. Patient details stay with the hospitals.</p></div>
+        <div class="admin-head"><div class="title"><h1>Live cases</h1><p>Every open case on the network map, and the last 100 broadcasts below. Patient details stay with the hospitals.</p></div>
           <button id="liveRefresh" type="button" class="c-btn c-btn-quiet">Refresh</button></div>
+        <div class="panel live-map-panel" style="margin-top:16px">
+          <div id="liveMap" class="live-map" role="region" aria-label="Network map: ambulances, where open cases were sent from, and hospitals"></div>
+          <div class="live-legend">
+            <b id="liveSummary" role="status">Loading…</b>
+            <span class="lg"><i class="amb-marker amb-RED" aria-hidden="true"></i>Ambulance en route (colour = priority)</span>
+            <span class="lg"><i class="origin-marker" aria-hidden="true"></i>Waiting for a hospital</span>
+            <span class="lg"><i class="hosp-marker" aria-hidden="true">+</i>Destination</span>
+            <span class="lg"><i class="net-marker" aria-hidden="true"></i>Hospital that can receive cases</span>
+          </div>
+        </div>
         <div class="panel table-box" style="margin-top:16px">
           <table class="table">
             <thead><tr><th>Case</th><th>Status</th><th>Priority</th><th>Hospitals offered</th><th>Accepted by</th><th>Created</th></tr></thead>

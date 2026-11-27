@@ -15,6 +15,7 @@ import './styles.css';
 import { Geolocation } from '@capacitor/geolocation';
 import { watchPosition } from './modules/position-watch.js';
 import { recordArrival } from './modules/arrival.js';
+import { fixFromPosition, sharePosition, describeShare } from './modules/position-share.js';
 
 import {
   MAX_IMAGES, VITAL_KEYS, DEMO_CASE_TYPES, CATEGORY_LABELS,
@@ -148,6 +149,7 @@ function boot(win, doc) {
     lastPayload: null,
     lastClientRequestId: null,
     crewTokens: {},
+    lastShare: null,
   };
 
   let pollTimer = null;
@@ -1181,37 +1183,26 @@ function boot(win, doc) {
     if (tracking) tracking.hidden = false;
     if (state.demo || geoWatch != null) return;
     const geo = win.navigator && win.navigator.geolocation;
-    if (!socket) { const t = $('trackingText'); if (t) t.textContent = 'Live tracking unavailable — realtime connection is required'; return; }
     const code = state.activeCaseCode;
     const text = $('trackingText');
-    if (text) text.textContent = 'Waiting for GPS and server confirmation…';
-    let lastSent = 0;
+    if (text) text.textContent = 'Waiting for GPS…';
+    let lastSent = 0, inFlight = false;
     geoWatch = watchPosition({ native: isCapacitorRuntime(win), plugin: Geolocation, geolocation: geo,
       onPosition: pos => {
         if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== 'ACCEPTED') return;
-        if (!socket || !socket.connected) { if (text) text.textContent = 'Disconnected — hospital is not receiving location updates'; return; }
         const now = Date.now();
-        if (now - lastSent < 10000) return;
-        const c = pos && pos.coords;
-        const coords = validCoords(c && c.latitude, c && c.longitude);
-        const timestamp = pos && pos.timestamp;
-        if (!coords || !Number.isFinite(timestamp) || now - timestamp > 30000 || timestamp > now + 30000 || c.accuracy > 200) {
-          if (text) text.textContent = 'Waiting for a fresh, accurate GPS fix…';
-          return;
-        }
-        lastSent = now;
-        // Do not buffer old positions across a socket outage.
-        let confirmed = false;
-        const timer = setTimeout(() => { if (!confirmed && text && state.activeCaseCode === code) text.textContent = 'Location delivery unconfirmed — waiting for connection'; }, 6000);
-        socket.volatile.emit('ambulance:position', {
-          case_code: code, crew_token: crewTokenFor(code), lat: coords.lat, lng: coords.lng,
-          accuracy_m: toNumberOrNull(c.accuracy),
-          speed_kmh: c.speed != null && c.speed >= 0 ? Math.round(c.speed * 3.6) : null,
-          source: 'gps', at: new Date(timestamp).toISOString(),
-        }, ack => {
-          confirmed = true; clearTimeout(timer);
+        if (inFlight || now - lastSent < 10000) return;
+        const checked = fixFromPosition(pos, now);
+        if (!checked.ok) { if (text) text.textContent = describeShare(checked); return; }
+        lastSent = now; inFlight = true;
+        /* Socket first, HTTP if the socket is down or the acknowledgement is
+           lost — the hospital's map must not depend on one connection. */
+        sharePosition({ socket, fetch: win.fetch && win.fetch.bind(win), apiRoot: env.apiRoot,
+          caseCode: code, crewToken: crewTokenFor(code), fix: checked.fix }).then(result => {
+          inFlight = false;
           if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== 'ACCEPTED') return;
-          if (text) text.textContent = ack && ack.success ? 'GPS location delivered to the accepting hospital' : 'Location was not accepted — waiting for a fresh fix';
+          state.lastShare = result;
+          if (text) text.textContent = describeShare(result);
         });
       },
       onError: err => { if (text) text.textContent = 'GPS unavailable — check location permission and keep the app open'; },
@@ -1236,15 +1227,22 @@ function boot(win, doc) {
   function paintTracking(body) {
     const text = $('trackingText');
     const eta = $('activeEta');
-    if (body && body.live_eta_minutes != null && eta) eta.textContent = body.live_eta_minutes + ' min';
+    if (body && eta) {
+      if (body.live_eta_minutes != null) eta.textContent = body.live_eta_minutes + ' min';
+      else if (body.est_eta_minutes != null) eta.textContent = '≈ ' + body.est_eta_minutes + ' min';
+    }
     if (!text || !body) return;
     if (body.eta_source === 'stale') { text.textContent = 'Location is stale — hospital is waiting for a fresh GPS fix'; if (eta) eta.textContent = 'Unavailable'; return; }
-    if (!socket || !socket.connected) { text.textContent = 'Disconnected — hospital is not receiving location updates'; return; }
+    if (!socket || !socket.connected) {
+      /* The HTTP fallback may still be getting fixes through. */
+      text.textContent = state.lastShare && state.lastShare.success ? describeShare(state.lastShare) : 'Disconnected — hospital is not receiving location updates';
+      return;
+    }
     if (!body.position_at && !body.at) return;
     text.textContent = ['stalled', 'stationary'].includes(body.eta_source)
       ? 'Not moving — tell the hospital if you are delayed'
-      : 'Sharing location with the accepting hospital' +
-        (body.live_eta_minutes != null ? ' · ' + body.live_eta_minutes + ' min out' : '');
+      : (body.approximate ? 'Sharing an approximate location (GPS is rough here)' : 'Sharing location with the accepting hospital') +
+        (body.live_eta_minutes != null ? ' · ' + body.live_eta_minutes + ' min out' : body.est_eta_minutes != null ? ' · about ' + body.est_eta_minutes + ' min out' : '');
   }
 
   /* Report delay: pick a reason and roughly how long, then tell the
