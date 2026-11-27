@@ -11,10 +11,12 @@
 const { createMemoryStore } = require('./memoryStore');
 const { createMysqlStore } = require('./mysqlStore');
 const { createMemoryAccounts, createMysqlAccounts } = require('./accountStore');
+const { createMemoryAmbulances, createMysqlAmbulances } = require('./ambulanceStore');
 const { ensureSchema } = require('./migrate');
 
 let active = null;
 let accounts = null;
+let ambulances = null;
 let pool = null;
 
 async function initStore() {
@@ -27,6 +29,7 @@ async function initStore() {
     await ensureSchema(pool);
     active = createMysqlStore(pool); await active.init();
     accounts = createMysqlAccounts(pool); await accounts.init();
+    ambulances = createMysqlAmbulances(pool); await ambulances.init();
     const s = pool.settings || {};
     console.log('🗃️  Store: MySQL (' + s.host + ':' + s.port + '/' + s.database + ', from ' + s.source + ')');
     return active;
@@ -41,16 +44,18 @@ async function initStore() {
 async function useMemory(label) {
   active = createMemoryStore(); await active.init();
   accounts = createMemoryAccounts(); await accounts.init();
+  ambulances = createMemoryAmbulances(); await ambulances.init();
   console.log('🗃️  Store: ' + label);
   return active;
 }
 
 function getStore() { if (!active) throw new Error('Store not initialised'); return active; }
 function getAccounts() { if (!accounts) throw new Error('Store not initialised'); return accounts; }
+function getAmbulances() { if (!ambulances) throw new Error('Store not initialised'); return ambulances; }
 /** The MySQL pool when MySQL is live, else null. Used for write-through persistence. */
 function getPool() { return pool; }
 
 /* Test hook: run the services against the in-memory drivers without booting a server. */
 async function useMemoryForTests() { return useMemory('in-memory (test)'); }
 
-module.exports = { initStore, getStore, getAccounts, getPool, useMemoryForTests };
+module.exports = { initStore, getStore, getAccounts, getAmbulances, getPool, useMemoryForTests };

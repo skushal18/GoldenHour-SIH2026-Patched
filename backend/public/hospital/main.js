@@ -168,6 +168,6 @@
     });
   }
   if (/^#activate/.test(location.hash) || /[?&]activate\b/.test(location.search)) return showActivate();
-  if (!GH.session()) return showLogin();
+  if (!GH.session()) return showLogin(GH.signedOutReason() || undefined);
   resume(0);
 })();

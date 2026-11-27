@@ -186,15 +186,15 @@
       const addListener = createPluginMethodWrapper("addListener");
       const removeListener = createPluginMethodWrapper("removeListener");
       const addListenerNative = (eventName, callback) => {
-        const call = addListener({ eventName }, callback);
+        const call2 = addListener({ eventName }, callback);
         const remove = async () => {
-          const callbackId = await call;
+          const callbackId = await call2;
           removeListener({
             eventName,
             callbackId
           }, callback);
         };
-        const p = new Promise((resolve) => call.then(() => resolve({ remove })));
+        const p = new Promise((resolve) => call2.then(() => resolve({ remove })));
         p.remove = async () => {
           console.warn(`Using addListener() without 'await' is deprecated.`);
           await remove();
@@ -769,6 +769,203 @@
     if (result.reason === "OFFLINE") return "No connection — location will be sent when the signal returns";
     if (result.reason === "NOT_TRACKING") return "Location sharing has ended for this case";
     return "Location was not accepted — waiting for a fresh fix";
+  }
+  const APP_VERSION = "7.2.0";
+  const AUTH_KEY = "goldenhour.ambulance";
+  const INSTALL_KEY = "goldenhour.installationId";
+  function readAuth(storage) {
+    try {
+      const raw = storage.getItem(AUTH_KEY);
+      const v = raw ? JSON.parse(raw) : null;
+      return v && v.token ? v : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function writeAuth(storage, value) {
+    try {
+      if (value) storage.setItem(AUTH_KEY, JSON.stringify(value));
+      else storage.removeItem(AUTH_KEY);
+    } catch (_) {
+    }
+  }
+  function installationId(storage, rand) {
+    try {
+      let id = storage.getItem(INSTALL_KEY);
+      if (!id) {
+        const r = rand || (() => Math.random().toString(16).slice(2));
+        id = (r() + r() + r()).replace(/[^0-9a-f]/g, "").slice(0, 24).padEnd(24, "0");
+        storage.setItem(INSTALL_KEY, id);
+      }
+      return id;
+    } catch (_) {
+      return null;
+    }
+  }
+  function parseUserAgent(ua) {
+    const s2 = String(ua || "");
+    const out = { os: null, os_version: null, model: null, manufacturer: null };
+    let m = s2.match(/Android\s+([\d.]+)(?:;\s*([^;)]+))?/);
+    if (m) {
+      out.os = "Android";
+      out.os_version = m[1];
+      const model = (m[2] || "").replace(/\s+Build\/.*$/, "").trim();
+      if (model && model !== "K" && !/^wv$/i.test(model)) out.model = model;
+      if (out.model) {
+        const makers = [
+          [/^SM-|Samsung/i, "Samsung"],
+          [/^Pixel/i, "Google"],
+          [/^(Redmi|Mi |POCO|M\d{4})/i, "Xiaomi"],
+          [/^(CPH|OPPO)/i, "OPPO"],
+          [/^(RMX|realme)/i, "realme"],
+          [/^(V\d{4}|vivo)/i, "vivo"],
+          [/^(moto|XT\d)/i, "Motorola"],
+          [/^(ONEPLUS|[A-Z]{2}\d{4}$)/i, "OnePlus"],
+          [/^Nokia/i, "Nokia"]
+        ];
+        for (const [re, name] of makers) if (re.test(out.model)) {
+          out.manufacturer = name;
+          break;
+        }
+      }
+      return out;
+    }
+    if (m = s2.match(/(iPhone|iPad).*?OS\s+([\d_]+)/)) {
+      out.os = "iOS";
+      out.os_version = m[2].replace(/_/g, ".");
+      out.model = m[1];
+      out.manufacturer = "Apple";
+      return out;
+    }
+    if (m = s2.match(/Windows NT\s+([\d.]+)/)) {
+      out.os = "Windows";
+      out.os_version = m[1];
+      return out;
+    }
+    if (m = s2.match(/Mac OS X\s+([\d_]+)/)) {
+      out.os = "macOS";
+      out.os_version = m[1].replace(/_/g, ".");
+      return out;
+    }
+    if (/Linux/.test(s2)) out.os = "Linux";
+    return out;
+  }
+  async function describeDevice(win, storage, native) {
+    const nav = win && win.navigator || {};
+    const ua = nav.userAgent || "";
+    const p = parseUserAgent(ua);
+    const scr = win && win.screen;
+    const dpr = win && win.devicePixelRatio || 1;
+    const out = {
+      installation_id: installationId(storage),
+      platform: native ? "android" : "web",
+      model: p.model,
+      manufacturer: p.manufacturer,
+      os: p.os,
+      os_version: p.os_version,
+      app_version: APP_VERSION,
+      webview: (ua.match(/Chrome\/([\d.]+)/) || [])[1] ? "Chrome " + ua.match(/Chrome\/([\d.]+)/)[1] : null,
+      screen: scr && scr.width ? Math.round(scr.width * dpr) + "×" + Math.round(scr.height * dpr) : null,
+      memory_gb: typeof nav.deviceMemory === "number" ? nav.deviceMemory : null,
+      cpu_cores: typeof nav.hardwareConcurrency === "number" ? nav.hardwareConcurrency : null,
+      network: nav.connection && nav.connection.effectiveType ? nav.connection.effectiveType : null,
+      online: typeof nav.onLine === "boolean" ? nav.onLine : null,
+      language: nav.language || null,
+      user_agent: ua.slice(0, 300),
+      battery_pct: null,
+      charging: null,
+      location_permission: null
+    };
+    try {
+      if (nav.getBattery) {
+        const b = await Promise.race([nav.getBattery(), new Promise((r) => setTimeout(() => r(null), 800))]);
+        if (b) {
+          out.battery_pct = Math.round(b.level * 100);
+          out.charging = !!b.charging;
+        }
+      }
+    } catch (_) {
+    }
+    try {
+      if (nav.permissions && nav.permissions.query) {
+        const st = await Promise.race([nav.permissions.query({ name: "geolocation" }), new Promise((r) => setTimeout(() => r(null), 800))]);
+        if (st && st.state) out.location_permission = st.state;
+      }
+    } catch (_) {
+    }
+    return out;
+  }
+  async function call(fetcher, url, opts) {
+    let res;
+    try {
+      res = await fetcher(url, opts);
+    } catch (_) {
+      const e = new Error("Cannot reach GoldenHour. Check the signal and try again.");
+      e.network = true;
+      throw e;
+    }
+    let body = {};
+    try {
+      body = await res.json();
+    } catch (_) {
+    }
+    if (!res.ok || body.success === false) {
+      const e = new Error(body.message || "Request failed (" + res.status + ")");
+      e.status = res.status;
+      e.reason = body.reason;
+      throw e;
+    }
+    return body;
+  }
+  const json = (method, token, body) => ({
+    method,
+    headers: Object.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}),
+    body: body === void 0 ? void 0 : JSON.stringify(body)
+  });
+  function signIn(fetcher, apiRoot, code, device) {
+    return call(fetcher, apiRoot + "/auth/ambulance/pair", json("POST", null, { code, device }));
+  }
+  function heartbeat(fetcher, apiRoot, token, device) {
+    return call(fetcher, apiRoot + "/ambulance/heartbeat", json("POST", token, { device }));
+  }
+  function saveCrew(fetcher, apiRoot, token, crew) {
+    return call(fetcher, apiRoot + "/ambulance/crew", json("PUT", token, { crew }));
+  }
+  function signOut(fetcher, apiRoot, token) {
+    return call(fetcher, apiRoot + "/ambulance/sign-out", json("POST", token, {}));
+  }
+  function fetchRoute(fetcher, apiRoot, caseCode, crewToken) {
+    return call(fetcher, apiRoot + "/requests/" + encodeURIComponent(caseCode) + "/route", { headers: { "X-Crew-Token": crewToken || "" } });
+  }
+  function isSignedOut(err) {
+    return !!err && (err.reason === "AMBULANCE_SIGN_IN" || err.reason === "AMBULANCE_DISABLED");
+  }
+  function metres(a, b) {
+    if (!a || !b) return null;
+    const R = 6371e3, r = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  function nextStep(steps, here) {
+    const list = (steps || []).filter((s2) => s2 && s2.at);
+    if (!list.length || !here) return null;
+    let best = 0, bestD = Infinity;
+    list.forEach((s2, i2) => {
+      const d = metres(here, s2.at);
+      if (d < bestD) {
+        bestD = d;
+        best = i2;
+      }
+    });
+    let i = best;
+    if (list[i].type === "depart" || bestD < 30) i = Math.min(best + 1, list.length - 1);
+    return { index: i, step: list[i], metres: Math.round(metres(here, list[i].at)) };
+  }
+  function formatDistance(m) {
+    if (m == null || !Number.isFinite(m)) return "—";
+    if (m < 1e3) return (m < 100 ? Math.max(10, Math.round(m / 10) * 10) : Math.round(m / 50) * 50) + " m";
+    return (m / 1e3).toFixed(m < 1e4 ? 1 : 0) + " km";
   }
   const AGE_BANDS = [
     { id: "baby", label: "Baby", hint: "0 – 3", value: 1, min: 0, max: 3 },
@@ -1477,6 +1674,7 @@
       if (el) el.addEventListener(evt, fn);
     };
     const storage = safeStorage(win);
+    let auth = null;
     const env = resolveEnvironment({
       config: win.GH_CONFIG,
       location: win.location,
@@ -1490,8 +1688,16 @@
       shouldFail: () => !!win.__GH_DEMO_FAIL
     }) : createLiveTransport(env.apiRoot || "", (url, opts) => {
       if (typeof win.fetch !== "function") return Promise.reject(new NetworkError("No fetch in this runtime"));
-      return win.fetch(url, opts).then((res) => {
+      const o = Object.assign({}, opts || {});
+      if (auth && auth.token) o.headers = Object.assign({}, o.headers || {}, { Authorization: "Bearer " + auth.token });
+      return win.fetch(url, o).then((res) => {
         if (res.status >= 502 && res.status <= 504) wakeServer();
+        if ((res.status === 401 || res.status === 403) && res.clone) {
+          res.clone().json().then((b) => {
+            if (b && isSignedOut(b)) ambulanceSignedOut(b.message);
+          }).catch(() => {
+          });
+        }
         return res;
       }, (err) => {
         wakeServer();
@@ -1532,9 +1738,12 @@
     let flushTimer = null;
     let socket = null;
     let geoWatch = null;
-    const VIEWS = { home: "homeView", new: "formScroll", cases: "casesView", settings: "settingsView" };
-    const VIEW_IDS = ["homeView", "formScroll", "casesView", "settingsView"];
+    const VIEWS = { home: "homeView", new: "formScroll", cases: "casesView", settings: "settingsView", signin: "signinView" };
+    const VIEW_IDS = ["homeView", "formScroll", "casesView", "settingsView", "signinView"];
     function showView(name) {
+      if (!state.demo && !auth) name = "signin";
+      const tabs = $("tabbar");
+      if (tabs) tabs.hidden = name === "signin";
       const target = VIEWS[name] || VIEWS.home;
       VIEW_IDS.forEach((id) => {
         const el2 = $(id);
@@ -2206,7 +2415,7 @@
         images: state.images,
         eta: $("eta") ? $("eta").value : "",
         notes: $("notes") ? $("notes").value : "",
-        ambulanceId: $("ambulanceId") ? $("ambulanceId").value : "",
+        ambulanceId: auth && auth.ambulance ? auth.ambulance.registration : $("ambulanceId") ? $("ambulanceId").value : "",
         face: state.fastState.face,
         arm: state.fastState.arm,
         speech: state.fastState.speech,
@@ -2401,12 +2610,12 @@
         const meta = doc.createElement("small");
         meta.textContent = (h.location_quality === "listed" ? "" : "≈ ") + Number(h.distance_km).toFixed(1) + " km" + (h.district ? " · " + h.district : "");
         name.appendChild(meta);
-        const call = doc.createElement("a");
-        call.href = "tel:" + String(h.phone).split(/[,/]/)[0].replace(/[^\d+]/g, "");
-        call.textContent = "Call";
-        call.setAttribute("aria-label", "Call " + h.name);
+        const call2 = doc.createElement("a");
+        call2.href = "tel:" + String(h.phone).split(/[,/]/)[0].replace(/[^\d+]/g, "");
+        call2.textContent = "Call";
+        call2.setAttribute("aria-label", "Call " + h.name);
         row.appendChild(name);
-        row.appendChild(call);
+        row.appendChild(call2);
         rows.appendChild(row);
       });
       box.hidden = false;
@@ -2424,20 +2633,411 @@
         meta.textContent = bits.join(" · ");
       }
       if (box) box.hidden = false;
-      const call = $("callBtn");
-      if (call) {
+      const call2 = $("callBtn");
+      if (call2) {
         if (hospital.phone) {
-          call.setAttribute("href", "tel:" + hospital.phone);
-          call.hidden = false;
-        } else call.hidden = true;
+          call2.setAttribute("href", "tel:" + hospital.phone);
+          call2.hidden = false;
+        } else call2.hidden = true;
       }
-      const nav = $("navBtn");
-      if (nav) {
+      const nav2 = $("navBtn");
+      if (nav2) {
         if (hospital.lat != null && hospital.lng != null) {
-          nav.setAttribute("href", "geo:" + hospital.lat + "," + hospital.lng + "?q=" + hospital.lat + "," + hospital.lng + "(" + encodeURIComponent(hospital.name || "Hospital") + ")");
-          nav.hidden = false;
-        } else nav.hidden = true;
+          nav2.setAttribute("href", "https://www.google.com/maps/dir/?api=1&destination=" + hospital.lat + "," + hospital.lng + "&travelmode=driving");
+          nav2.setAttribute("target", "_blank");
+          nav2.hidden = false;
+        } else nav2.hidden = true;
       }
+    }
+    let heartbeatTimer = null;
+    const fetcher = (u2, o) => typeof win.fetch === "function" ? win.fetch(u2, o) : Promise.reject(new Error("No network"));
+    function ambulanceSignedOut(message) {
+      if (state.demo || !auth) return;
+      auth = null;
+      writeAuth(storage, null);
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      const err = $("signinError");
+      if (err) {
+        err.textContent = message || "This phone was signed out. Enter a new sign-in code from your administrator.";
+        err.hidden = false;
+      }
+      showView("signin");
+    }
+    async function sendHeartbeat() {
+      if (state.demo || !auth) return;
+      try {
+        const b = await heartbeat(fetcher, env.apiRoot, auth.token, await describeDevice(win, storage, isCapacitorRuntime(win)));
+        auth.ambulance = b.ambulance;
+        writeAuth(storage, auth);
+        paintUnit();
+      } catch (e) {
+        if (isSignedOut(e)) ambulanceSignedOut(e.message);
+      }
+    }
+    function startHeartbeat() {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      sendHeartbeat();
+      heartbeatTimer = setInterval(sendHeartbeat, 5 * 6e4);
+    }
+    on($("signinForm"), "submit", async (e) => {
+      e.preventDefault();
+      const code = $("signinCode") && $("signinCode").value || "";
+      const err = $("signinError"), btn = $("signinBtn");
+      if (err) err.hidden = true;
+      if (code.replace(/[^0-9a-z]/gi, "").length !== 16) {
+        if (err) {
+          err.textContent = "The sign-in code has 16 letters and digits.";
+          err.hidden = false;
+        }
+        return;
+      }
+      if (btn) btn.disabled = true;
+      try {
+        const b = await signIn(fetcher, env.apiRoot, code, await describeDevice(win, storage, isCapacitorRuntime(win)));
+        auth = { token: b.token, ambulance: b.ambulance };
+        writeAuth(storage, auth);
+        if ($("signinCode")) $("signinCode").value = "";
+        showView("home");
+        paintUnit();
+        startHeartbeat();
+        toast("Signed in as " + b.ambulance.registration);
+      } catch (ex) {
+        if (err) {
+          err.textContent = ex.message;
+          err.hidden = false;
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    });
+    function paintUnit() {
+      const signed = !!(auth && auth.ambulance);
+      const a = signed ? auth.ambulance : null;
+      const show = (id, v) => {
+        const el = $(id);
+        if (el) el.hidden = !v;
+      };
+      show("unitSigned", signed);
+      show("unitManual", !signed);
+      show("crewCard", signed);
+      show("deviceCard", signed);
+      const sub = doc.querySelector(".brand-sub");
+      if (sub) sub.textContent = signed ? a.registration + (a.unit_name ? " · " + a.unit_name : "") : "Pre-arrival emergency coordination";
+      if (!signed) return;
+      const set = (id, v) => {
+        const el = $(id);
+        if (el) el.textContent = v == null || v === "" ? "—" : String(v);
+      };
+      set("unitReg", a.registration);
+      set("unitType", a.vehicle_type || "Ambulance");
+      set("unitName", a.unit_name);
+      set("unitOperator", a.operator);
+      set("unitBase", a.base_location);
+      set("unitSince", a.paired_at ? new Date(a.paired_at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+      const list = $("crewList");
+      if (list) {
+        list.textContent = "";
+        (a.crew || []).forEach((m, i) => {
+          const li = doc.createElement("li");
+          li.className = "crew-row";
+          const t = doc.createElement("span");
+          t.className = "crew-text";
+          const b = doc.createElement("b");
+          b.textContent = m.name;
+          const r = doc.createElement("span");
+          r.className = "crew-role";
+          r.textContent = m.role;
+          t.appendChild(b);
+          t.appendChild(r);
+          if (m.phone) {
+            const ph = doc.createElement("small");
+            ph.textContent = m.phone;
+            t.appendChild(ph);
+          }
+          const x = doc.createElement("button");
+          x.type = "button";
+          x.className = "crew-remove";
+          x.setAttribute("aria-label", "Remove " + m.name);
+          x.textContent = "×";
+          x.addEventListener("click", () => updateCrew((a.crew || []).filter((_, j) => j !== i)));
+          li.appendChild(t);
+          li.appendChild(x);
+          list.appendChild(li);
+        });
+        if (!(a.crew || []).length) {
+          const li = doc.createElement("li");
+          li.className = "empty-note";
+          li.textContent = "Add who is on this shift.";
+          list.appendChild(li);
+        }
+      }
+      const d = a.device || {};
+      const rows = [
+        ["Phone", [d.manufacturer, d.model].filter(Boolean).join(" ") || "—"],
+        ["System", d.os ? d.os + (d.os_version ? " " + d.os_version : "") : "—"],
+        ["App", d.app_version ? "GoldenHour " + d.app_version + (d.platform === "android" ? " (Android app)" : " (browser)") : "—"],
+        ["Screen", d.screen || "—"],
+        ["Battery", d.battery_pct != null ? Math.round(d.battery_pct) + "%" + (d.charging ? " · charging" : "") : "—"],
+        ["Network", d.network ? d.network.toUpperCase() : "—"],
+        ["Location", d.location_permission || "—"]
+      ];
+      const dl = $("deviceList");
+      if (dl) dl.innerHTML = rows.map((r) => '<div class="setting-row"><span class="setting-label">' + escapeHtml(r[0]) + '</span><b class="setting-value">' + escapeHtml(r[1]) + "</b></div>").join("");
+    }
+    function escapeHtml(t) {
+      return String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    }
+    async function updateCrew(crew) {
+      const err = $("crewError");
+      if (err) err.hidden = true;
+      try {
+        const b = await saveCrew(fetcher, env.apiRoot, auth.token, crew);
+        auth.ambulance = b.ambulance;
+        writeAuth(storage, auth);
+        paintUnit();
+        return true;
+      } catch (e) {
+        if (isSignedOut(e)) {
+          ambulanceSignedOut(e.message);
+          return false;
+        }
+        if (err) {
+          err.textContent = e.message;
+          err.hidden = false;
+        }
+        return false;
+      }
+    }
+    on($("crewAddBtn"), "click", async () => {
+      if (!auth) return;
+      const name = ($("crewName").value || "").trim();
+      if (!name) {
+        const err = $("crewError");
+        if (err) {
+          err.textContent = "Enter a name.";
+          err.hidden = false;
+        }
+        return;
+      }
+      const roleBtn = doc.querySelector("#crewRoleSeg .seg-btn.is-on");
+      const ok = await updateCrew((auth.ambulance.crew || []).concat([{ name, role: roleBtn ? roleBtn.dataset.value : "Other", phone: ($("crewPhone").value || "").trim() || null }]));
+      if (ok) {
+        $("crewName").value = "";
+        $("crewPhone").value = "";
+        toast("Crew updated");
+      }
+    });
+    on($("crewRoleSeg"), "click", (e) => {
+      const b = e.target.closest(".seg-btn");
+      if (!b) return;
+      doc.querySelectorAll("#crewRoleSeg .seg-btn").forEach((x) => {
+        const onNow = x === b;
+        x.classList.toggle("is-on", onNow);
+        x.setAttribute("aria-checked", onNow ? "true" : "false");
+      });
+    });
+    on($("unitSignOutBtn"), "click", async () => {
+      if (!auth) return;
+      if (win.confirm && !win.confirm("Sign this phone out of " + auth.ambulance.registration + "?\n\nYou will need a new code from your administrator to sign in again.")) return;
+      try {
+        await signOut(fetcher, env.apiRoot, auth.token);
+      } catch (_) {
+      }
+      ambulanceSignedOut("Signed out. Enter a new sign-in code from your administrator to sign in again.");
+    });
+    const nav = { code: null, timer: null, data: null, map: null, layers: null, userAt: 0, fitted: false, loading: null, resize: null };
+    function loadLeaflet() {
+      if (win.L) return Promise.resolve(win.L);
+      if (nav.loading) return nav.loading;
+      nav.loading = new Promise((resolve, reject) => {
+        const link = doc.createElement("link");
+        link.rel = "stylesheet";
+        link.href = "vendor/leaflet/leaflet.css";
+        doc.head.appendChild(link);
+        const sc = doc.createElement("script");
+        sc.src = "vendor/leaflet/leaflet.js";
+        sc.onload = () => resolve(win.L);
+        sc.onerror = () => {
+          nav.loading = null;
+          reject(new Error("map unavailable"));
+        };
+        doc.head.appendChild(sc);
+      });
+      return nav.loading;
+    }
+    function startNav(code) {
+      if (state.demo || !code) return;
+      const card = $("navCard");
+      if (card) card.hidden = false;
+      if (nav.code === code && nav.timer) return;
+      stopNav(true);
+      nav.code = code;
+      refreshNav();
+      nav.timer = setInterval(refreshNav, 15e3);
+    }
+    function stopNav(keepCard) {
+      if (nav.timer) {
+        clearInterval(nav.timer);
+        nav.timer = null;
+      }
+      nav.code = null;
+      nav.data = null;
+      nav.fitted = false;
+      if (nav.resize) {
+        try {
+          nav.resize.disconnect();
+        } catch (_) {
+        }
+        nav.resize = null;
+      }
+      if (nav.map) {
+        try {
+          nav.map.remove();
+        } catch (_) {
+        }
+        nav.map = null;
+        nav.layers = null;
+      }
+      if (!keepCard) {
+        const card = $("navCard");
+        if (card) card.hidden = true;
+      }
+    }
+    async function refreshNav() {
+      const code = nav.code;
+      if (!code) return;
+      try {
+        const body = await fetchRoute(fetcher, env.apiRoot, code, crewTokenFor(code));
+        if (nav.code !== code) return;
+        nav.data = body;
+        paintNav();
+      } catch (e) {
+        const note = $("navNote");
+        if (note) note.textContent = e.network ? "No signal — showing the last route." : "";
+      }
+    }
+    const TURN = { left: "←", right: "→", "slight left": "↖", "slight right": "↗", "sharp left": "↙", "sharp right": "↘", uturn: "↶", straight: "↑" };
+    function turnGlyph(step) {
+      if (!step) return "↑";
+      if (step.type === "arrive") return "⚑";
+      if (step.type === "roundabout" || step.type === "rotary") return "⟳";
+      return TURN[step.modifier] || "↑";
+    }
+    function hereFor(d) {
+      return state.lastFix || d && d.from || null;
+    }
+    function paintNav() {
+      const d = nav.data;
+      if (!d) return;
+      const r = d.route, here = hereFor(d);
+      const setT = (id, v) => {
+        const el = $(id);
+        if (el) el.textContent = v;
+      };
+      const remainingM = r ? r.distance_m : d.live && d.live.distance_km != null ? d.live.distance_km * 1e3 : here && d.hospital ? metres(here, d.hospital) : null;
+      const etaMin = d.live && d.live.live_eta_minutes != null ? d.live.live_eta_minutes : r ? Math.max(1, Math.round(r.duration_s / 60)) : d.live ? d.live.est_eta_minutes : null;
+      setT("navRemain", formatDistance(remainingM) + (r ? " by road" : ""));
+      setT("navEta", etaMin != null ? etaMin + " min" : "—");
+      setT("navArrive", etaMin != null ? new Date(Date.now() + etaMin * 6e4).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—");
+      const steps = $("navSteps");
+      if (steps) steps.innerHTML = r && r.steps ? r.steps.map((st) => '<li><span class="nav-glyph" aria-hidden="true">' + turnGlyph(st) + "</span><span>" + escapeHtml(st.instruction) + "</span><small>" + escapeHtml(formatDistance(st.distance_m)) + "</small></li>").join("") : "";
+      const box = $("navStepsBox");
+      if (box) box.hidden = !(r && r.steps && r.steps.length);
+      const note = $("navNote");
+      if (note) note.textContent = r ? "Route on OpenStreetMap roads, updated as you drive. " + (d.hospital && d.hospital.source === "desk" ? "Ends at the ER desk’s location." : "Ends at the hospital’s address.") : "Road route unavailable — the line shows the direction to the hospital.";
+      if (d.navigate_url) {
+        const n = $("navBtn");
+        if (n) {
+          n.setAttribute("href", d.navigate_url);
+          n.hidden = false;
+        }
+      }
+      paintNavPosition();
+      loadLeaflet().then(drawNavMap).catch(() => {
+        const m = $("navMap");
+        if (m) m.hidden = true;
+      });
+    }
+    function paintNavPosition() {
+      const d = nav.data;
+      if (!d) return;
+      const here = hereFor(d), r = d.route;
+      const nx = r ? nextStep(r.steps, here) : null;
+      const setT = (id, v) => {
+        const el = $(id);
+        if (el) el.textContent = v;
+      };
+      if (nx) {
+        setT("navNextDist", formatDistance(nx.metres));
+        setT("navNextText", nx.step.instruction);
+        setT("navTurnIcon", turnGlyph(nx.step));
+      } else {
+        setT("navNextDist", here && d.hospital ? formatDistance(metres(here, d.hospital)) : "—");
+        setT("navNextText", "Head to " + (d.hospital && d.hospital.name || "the hospital"));
+        setT("navTurnIcon", "↑");
+      }
+      if (nav.map && nav.layers && here) {
+        nav.layers.me.setLatLng([here.lat, here.lng]);
+        if (Date.now() - nav.userAt > 2e4 && nav.fitted && !nav.map.getBounds().pad(-0.2).contains([here.lat, here.lng])) {
+          nav.map.panTo([here.lat, here.lng], { animate: true });
+        }
+      }
+    }
+    function drawNavMap(L) {
+      const d = nav.data, el = $("navMap");
+      if (!d || !el || !L) return;
+      el.hidden = false;
+      const here = hereFor(d), hosp = d.hospital && d.hospital.lat != null ? [d.hospital.lat, d.hospital.lng] : null;
+      if (!nav.map) {
+        nav.map = L.map(el, { zoomControl: true, attributionControl: true });
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(nav.map);
+        nav.map.on("dragstart", () => {
+          nav.userAt = Date.now();
+        });
+        const dot = (cls, size) => L.divIcon({ className: "", html: '<div class="' + cls + '"></div>', iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+        nav.layers = {
+          casing: L.polyline([], { color: "#5A2A06", weight: 9, opacity: 0.35 }).addTo(nav.map),
+          route: L.polyline([], { color: "#F59E0B", weight: 6, opacity: 0.95 }).addTo(nav.map),
+          line: L.polyline([], { color: "#D9622B", weight: 2, dashArray: "6 6" }).addTo(nav.map),
+          hosp: L.marker(hosp || [0, 0], { icon: dot("nav-hosp", 26), keyboard: false }).addTo(nav.map),
+          me: L.marker(here ? [here.lat, here.lng] : [0, 0], { icon: dot("nav-me", 22), keyboard: false, zIndexOffset: 500 }).addTo(nav.map)
+        };
+        if (typeof win.ResizeObserver === "function") {
+          nav.resize = new win.ResizeObserver(() => {
+            if (!nav.map) return;
+            try {
+              nav.map.invalidateSize();
+            } catch (_) {
+            }
+            if (!nav.fitted) fitNav(L);
+          });
+          nav.resize.observe(el);
+        }
+      }
+      const geom = d.route && d.route.geometry ? d.route.geometry : [];
+      nav.layers.casing.setLatLngs(geom);
+      nav.layers.route.setLatLngs(geom);
+      nav.layers.line.setLatLngs(!geom.length && here && hosp ? [[here.lat, here.lng], hosp] : []);
+      if (hosp) nav.layers.hosp.setLatLng(hosp).bindTooltip(d.hospital && d.hospital.name || "Hospital");
+      if (here) nav.layers.me.setLatLng([here.lat, here.lng]);
+      try {
+        nav.map.invalidateSize();
+      } catch (_) {
+      }
+      if (!nav.fitted) fitNav(L);
+    }
+    function fitNav(L) {
+      const d = nav.data, el = $("navMap");
+      if (!d || !nav.map || !el || !el.clientWidth || !el.clientHeight) return;
+      const here = hereFor(d), hosp = d.hospital && d.hospital.lat != null ? [d.hospital.lat, d.hospital.lng] : null;
+      const geom = d.route && d.route.geometry ? d.route.geometry : [];
+      const pts = geom.length ? geom : [here ? [here.lat, here.lng] : null, hosp].filter(Boolean);
+      if (pts.length > 1) nav.map.fitBounds(L.latLngBounds(pts).pad(0.15), { maxZoom: 16 });
+      else if (pts.length) nav.map.setView(pts[0], 15);
+      nav.fitted = true;
     }
     function stopPolling() {
       if (pollTimer) {
@@ -2495,8 +3095,14 @@
         if (body.eta_source) extra.eta_source = body.eta_source;
         caseBook.setStatus(state.activeCaseCode, body.status, extra);
       }
-      if (body.status === "ACCEPTED") startSharingPosition();
-      if (["ARRIVED", "CANCELLED", "EXPIRED", "REJECTED"].includes(body.status)) stopSharingPosition();
+      if (body.status === "ACCEPTED") {
+        startSharingPosition();
+        startNav(state.activeCaseCode);
+      }
+      if (["ARRIVED", "CANCELLED", "EXPIRED", "REJECTED"].includes(body.status)) {
+        stopSharingPosition();
+        stopNav();
+      }
       if (body.status === "ACCEPTED") paintTracking(body);
       if (body.status === "ARRIVED") {
         const banner = $("arrivedBanner");
@@ -2551,6 +3157,11 @@
         geolocation: geo,
         onPosition: (pos) => {
           if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== "ACCEPTED") return;
+          const c0 = pos && pos.coords;
+          if (c0 && Number.isFinite(c0.latitude) && Number.isFinite(c0.longitude)) {
+            state.lastFix = { lat: c0.latitude, lng: c0.longitude, accuracy: c0.accuracy, at: Date.now() };
+            paintNavPosition();
+          }
           const now = Date.now();
           if (inFlight || now - lastSent < 1e4) return;
           const checked = fixFromPosition(pos, now);
@@ -3111,10 +3722,18 @@
     refreshNeeds();
     renderOutbox();
     renderHome();
+    if (!state.demo) auth = readAuth(storage);
+    paintUnit();
     renderSettings();
     locate();
     refreshSubmitHint();
     showView("home");
+    if (!state.demo && auth) startHeartbeat();
+    if (!state.demo && auth) {
+      on(win, "online", sendHeartbeat);
+      const cur = caseBook.current();
+      if (cur && cur.status === "ACCEPTED") startNav(cur.case_code);
+    }
     if (state.demo) {
       setNetPill("demo");
       const banner = $("demoBanner");

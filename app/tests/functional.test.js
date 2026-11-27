@@ -424,7 +424,9 @@ async function main() {
   });
   check("a navigate link is offered", function () {
     assert.strictEqual($("navBtn").hidden, false);
-    assert.strictEqual($("navBtn").getAttribute("href").indexOf("geo:12.9899,77.5921"), 0);
+    /* Directions, not just a pin: the Google Maps directions link opens turn-by-turn
+       guidance in the phone's maps app (Android hands it to Google Maps). */
+    assert.strictEqual($("navBtn").getAttribute("href"), "https://www.google.com/maps/dir/?api=1&destination=12.9899,77.5921&travelmode=driving");
   });
   check("polling has stopped (no further status changes)", function () {
     var before = $("statusChipText").textContent;

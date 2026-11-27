@@ -24,5 +24,13 @@ window.GH_DESK_CONFIG = {
      rougher than this (metres), or further than DESK_MAX_DRIFT_KM from the
      hospital's directory address, is not used — the address is used instead,
      and the board says why. The server applies the same limits. */
-  DESK_MAX_ACCURACY_M: 1000
+  DESK_MAX_ACCURACY_M: 1000,
+
+  /* Leave GoldenHour (close the tab or the browser, or go to another site)
+     for longer than this and the next visit asks you to sign in again. A page
+     that stays open — an ER wall screen — stays signed in. */
+  LEAVE_TIMEOUT_MINUTES: 5,
+  /* The administrator console also signs out after this long with no
+     mouse, touch or keyboard activity. It controls every login. */
+  ADMIN_IDLE_MINUTES: 30
 };

@@ -93,6 +93,31 @@ const TABLES = {
     diversion_active TINYINT(1) NOT NULL DEFAULT 0,
     updated_at DATETIME NOT NULL
   )`,
+  /* One row per ambulance on GoldenHour: the vehicle, its one-time sign-in
+     code (hash only), the phone it is signed in on and the crew on shift. */
+  ambulances: `CREATE TABLE IF NOT EXISTS ambulances (
+    ambulance_id INT AUTO_INCREMENT PRIMARY KEY,
+    registration VARCHAR(20) NOT NULL,
+    unit_name VARCHAR(120) NULL,
+    operator VARCHAR(120) NULL,
+    vehicle_type VARCHAR(20) NULL,
+    base_location VARCHAR(160) NULL,
+    phone VARCHAR(40) NULL,
+    status ENUM('PENDING','ACTIVE','DISABLED') NOT NULL DEFAULT 'PENDING',
+    code_hash CHAR(64) NULL,
+    code_expires_at DATETIME NULL,
+    token_version INT NOT NULL DEFAULT 0,
+    paired_at DATETIME NULL,
+    last_seen_at DATETIME NULL,
+    device JSON NULL,
+    crew JSON NULL,
+    crew_updated_at DATETIME NULL,
+    created_by VARCHAR(64) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_ambulance_registration (registration),
+    UNIQUE KEY uniq_ambulance_code (code_hash)
+  )`,
   case_events: `CREATE TABLE IF NOT EXISTS case_events (
     event_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     case_code VARCHAR(20) NOT NULL,

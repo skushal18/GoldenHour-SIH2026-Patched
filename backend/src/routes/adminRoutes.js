@@ -30,6 +30,7 @@ const { getStore, getAccounts } = require('../store');
 const tracking = require('../services/trackingService');
 const deskLocation = require('../services/deskLocationService');
 const { hospitalEnd } = require('../services/broadcastService');
+const ambulances = require('../services/ambulanceService');
 
 router.use(requireAuth(['SUPER_ADMIN']));
 
@@ -172,6 +173,7 @@ router.get('/live', async (req, res, next) => {
         created_at: r.created_at, accepted_at: r.accepted_at, arrived_at: r.arrived_at,
         hospitals_notified: r.targets.length,
         accepted_by: winner ? winner.name : null,
+        ambulance: r.ambulance ? r.ambulance.registration : (r.ambulance_id || null),
         origin: r.status === 'PENDING' || r.status === 'ACCEPTED' ? point(r.origin && r.origin.lat, r.origin && r.origin.lng) : null,
       };
       if (r.status === 'ACCEPTED' && winner) {
@@ -197,6 +199,61 @@ router.get('/live', async (req, res, next) => {
     res.json({ success: true, cases, hospitals });
   } catch (err) { next(err); }
 });
+
+/* ── Ambulances: one login per vehicle ─────────────────────────────────────
+   Register a vehicle (a one-time sign-in code comes back once), see which
+   phone the app is signed in on and the crew on shift, issue a new code
+   (signs the old phone out), switch a vehicle off or on, edit details. */
+router.get('/ambulances', async (req, res, next) => {
+  try {
+    const units = await ambulances.list();
+    const open = (await getStore().listAll(100)).filter(r => r.ambulance && (r.status === 'PENDING' || r.status === 'ACCEPTED'));
+    for (const u of units) {
+      const c = open.find(r => r.ambulance.ambulance_id === u.ambulance_id);
+      if (!c) { u.current_case = null; continue; }
+      const winner = c.accepted_hospital_id ? c.targets.find(t => t.hospital_id === c.accepted_hospital_id) : null;
+      const live = c.status === 'ACCEPTED' ? tracking.snapshot(c.case_code) : {};
+      u.current_case = { case_code: c.case_code, status: c.status, priority: c.priority, chief_complaint: c.chief_complaint,
+        hospital: winner ? winner.name : null, remaining_distance_km: live.distance_km == null ? null : Math.round(live.distance_km * 10) / 10 };
+    }
+    res.json({ success: true, ambulances: units, vehicle_types: ambulances.VEHICLE_TYPES,
+      sign_in_required: ambulances.required() });
+  } catch (err) { next(err); }
+});
+router.post('/ambulances', async (req, res, next) => {
+  try {
+    const r = await ambulances.create(req.body || {}, req.account);
+    if (!r.ok) return res.status(r.status).json({ success: false, reason: r.reason, message: r.message });
+    audit.record('ADMIN', 'AMBULANCE_CREATED', { ambulance_id: r.ambulance.ambulance_id, registration: r.ambulance.registration, by: req.account.username }, { kind: 'admin' });
+    res.status(201).json({ success: true, ambulance: r.ambulance, sign_in_code: r.sign_in_code, expires_at: r.expires_at });
+  } catch (err) { next(err); }
+});
+router.put('/ambulances/:id', async (req, res, next) => {
+  try {
+    const r = await ambulances.edit(req.params.id, req.body || {});
+    if (!r.ok) return res.status(r.status).json({ success: false, reason: r.reason, message: r.message });
+    audit.record('ADMIN', 'AMBULANCE_EDITED', { ambulance_id: r.ambulance.ambulance_id, registration: r.ambulance.registration, by: req.account.username }, { kind: 'admin' });
+    res.json({ success: true, ambulance: r.ambulance });
+  } catch (err) { next(err); }
+});
+router.post('/ambulances/:id/code', async (req, res, next) => {
+  try {
+    const r = await ambulances.reissueCode(req.params.id);
+    if (!r.ok) return res.status(r.status).json({ success: false, reason: r.reason, message: r.message });
+    audit.record('ADMIN', 'AMBULANCE_CODE_ISSUED', { ambulance_id: r.ambulance.ambulance_id, registration: r.ambulance.registration, by: req.account.username }, { kind: 'admin' });
+    res.json({ success: true, ambulance: r.ambulance, sign_in_code: r.sign_in_code, expires_at: r.expires_at });
+  } catch (err) { next(err); }
+});
+for (const [path, on, evt] of [['disable', false, 'AMBULANCE_DISABLED'], ['enable', true, 'AMBULANCE_ENABLED']]) {
+  router.post('/ambulances/:id/' + path, async (req, res, next) => {
+    try {
+      const r = await ambulances.setEnabled(req.params.id, on);
+      if (!r.ok) return res.status(r.status).json({ success: false, reason: r.reason, message: r.message });
+      audit.record('ADMIN', evt, { ambulance_id: r.ambulance.ambulance_id, registration: r.ambulance.registration, by: req.account.username }, { kind: 'admin' });
+      res.json({ success: true, ambulance: r.ambulance });
+    } catch (err) { next(err); }
+  });
+}
 
 router.get('/audit', (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 500);

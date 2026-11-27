@@ -197,6 +197,7 @@
     <nav class="adminnav" aria-label="Administration">
       <button type="button" data-tab="accounts" aria-current="page">Hospital accounts</button>
       <button type="button" data-tab="directory">Directory</button>
+      <button type="button" data-tab="ambulances">Ambulances</button>
       <button type="button" data-tab="live">Live cases</button>
       <button type="button" data-tab="audit">Audit log</button>
     </nav>
@@ -208,6 +209,7 @@
       <section class="kpis" aria-label="Network at a glance">
         <div class="kpi"><span class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 21V9l9-6 9 6v12h-6v-6H9v6z"/></svg></span><b data-kpi="hospitals">—</b><span>Hospitals on GoldenHour</span></div>
         <div class="kpi"><span class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></span><b data-kpi="logins">—</b><span>Hospitals with a live login</span></div>
+        <div class="kpi"><span class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M2 16V8h11v8M13 11h4l4 4v1"/><circle cx="6" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/><path d="M6 10v3M4.5 11.5h3"/></svg></span><b data-kpi="ambulances">—</b><span>Ambulances signed in</span></div>
         <div class="kpi kpi-hot"><span class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M2 16V8h11v8M13 11h4l4 4v1"/><circle cx="6" cy="17.5" r="2"/><circle cx="17" cy="17.5" r="2"/></svg></span><b data-kpi="enroute">—</b><span>Ambulances en route now</span></div>
         <div class="kpi"><span class="kpi-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><b data-kpi="waiting">—</b><span>Waiting for a hospital</span></div>
       </section>
@@ -260,6 +262,36 @@
           <table class="table">
             <thead><tr><th>Hospital</th><th>Type</th><th>Location</th><th>Phone</th><th><span class="sr-only">Actions</span></th></tr></thead>
             <tbody id="catRows"><tr><td colspan="5" class="table-empty">Search by name, district or pincode, or pick a state.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ambulances -->
+      <section data-pane="ambulances" hidden>
+        <div class="admin-head"><div class="title"><h1>Ambulances</h1><p>Each ambulance signs in to the GoldenHour app with its own one-time code. See which phone it is on, who is on shift and what it is doing now.</p></div>
+          <button id="ambRefresh" type="button" class="c-btn c-btn-quiet">Refresh</button></div>
+        <form id="ambForm" class="panel panel-pad amb-form" novalidate>
+          <div class="amb-form-head"><h2 id="ambFormTitle">Register an ambulance</h2><button type="button" class="c-btn-link" id="ambCancelEdit" hidden>Cancel editing</button></div>
+          <div class="amb-grid">
+            <label class="c-field">Registration number<input id="ambReg" type="text" autocapitalize="characters" spellcheck="false" placeholder="KA01AB1234" maxlength="20" required></label>
+            <label class="c-field">Unit name<input id="ambUnit" type="text" placeholder="108 · Koramangala unit 12" maxlength="120"></label>
+            <label class="c-field">Operator<input id="ambOperator" type="text" placeholder="GVK EMRI 108, a hospital, a private service" maxlength="120"></label>
+            <label class="c-field">Type<select id="ambType"><option value="">—</option><option>BLS</option><option>ALS</option><option>Neonatal</option><option>Patient transport</option><option>Other</option></select></label>
+            <label class="c-field">Base / station<input id="ambBase" type="text" placeholder="Koramangala fire station" maxlength="160"></label>
+            <label class="c-field">Vehicle phone<input id="ambPhone" type="tel" placeholder="+91 …" maxlength="40"></label>
+          </div>
+          <div id="ambError" class="c-alert c-alert-error" role="alert" hidden></div>
+          <button id="ambSubmit" class="c-btn c-btn-primary" type="submit">Register and get a sign-in code</button>
+        </form>
+        <div id="ambSecret" class="panel panel-pad amb-secret" hidden role="status">
+          <h2 id="ambSecretTitle">Sign-in code</h2>
+          <div class="secret"><code id="ambSecretCode"></code><button type="button" class="c-btn c-btn-quiet" id="ambCopy">Copy</button></div>
+          <p class="c-hint" id="ambSecretHint"></p>
+        </div>
+        <div class="panel table-box">
+          <table class="table amb-table">
+            <thead><tr><th>Ambulance</th><th>Status</th><th>App installed on</th><th>Crew on shift</th><th>Now</th><th><span class="sr-only">Actions</span></th></tr></thead>
+            <tbody id="ambRows"><tr><td colspan="6" class="table-empty">Loading…</td></tr></tbody>
           </table>
         </div>
       </section>

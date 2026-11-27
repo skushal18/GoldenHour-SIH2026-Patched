@@ -16,6 +16,10 @@ import { Geolocation } from '@capacitor/geolocation';
 import { watchPosition } from './modules/position-watch.js';
 import { recordArrival } from './modules/arrival.js';
 import { fixFromPosition, sharePosition, describeShare } from './modules/position-share.js';
+import {
+  readAuth, writeAuth, describeDevice, signIn as ambSignIn, heartbeat as ambHeartbeat, saveCrew as ambSaveCrew,
+  signOut as ambSignOut, fetchRoute, isSignedOut, nextStep, formatDistance, metres,
+} from './modules/ambulance.js';
 
 import {
   MAX_IMAGES, VITAL_KEYS, DEMO_CASE_TYPES, CATEGORY_LABELS,
@@ -89,6 +93,8 @@ function boot(win, doc) {
   const on = (el, evt, fn) => { if (el) el.addEventListener(evt, fn); };
 
   const storage = safeStorage(win);
+  /* This ambulance's own login (live mode only): { token, ambulance }. */
+  let auth = null;
 
   /* ── Environment ─────────────────────────────────────────────────────── */
 
@@ -109,8 +115,13 @@ function boot(win, doc) {
       })
     : createLiveTransport(env.apiRoot || '', (url, opts) => {
         if (typeof win.fetch !== 'function') return Promise.reject(new NetworkError('No fetch in this runtime'));
-        return win.fetch(url, opts).then(res => {
+        const o = Object.assign({}, opts || {});
+        if (auth && auth.token) o.headers = Object.assign({}, o.headers || {}, { Authorization: 'Bearer ' + auth.token });
+        return win.fetch(url, o).then(res => {
           if (res.status >= 502 && res.status <= 504) wakeServer();
+          if ((res.status === 401 || res.status === 403) && res.clone) {
+            res.clone().json().then(b => { if (b && isSignedOut(b)) ambulanceSignedOut(b.message); }).catch(() => {});
+          }
           return res;
         }, err => { wakeServer(); throw err; });
       });
@@ -169,10 +180,14 @@ function boot(win, doc) {
   /* Settings used to map to 'formScroll', which meant the Settings tab
      opened the emergency form and expanded a details card inside it. Device
      configuration has no business living in the alert workflow. */
-  const VIEWS = { home: 'homeView', new: 'formScroll', cases: 'casesView', settings: 'settingsView' };
-  const VIEW_IDS = ['homeView', 'formScroll', 'casesView', 'settingsView'];
+  const VIEWS = { home: 'homeView', new: 'formScroll', cases: 'casesView', settings: 'settingsView', signin: 'signinView' };
+  const VIEW_IDS = ['homeView', 'formScroll', 'casesView', 'settingsView', 'signinView'];
 
   function showView(name) {
+    /* Live: nothing opens until this ambulance has signed in. */
+    if (!state.demo && !auth) name = 'signin';
+    const tabs = $('tabbar');
+    if (tabs) tabs.hidden = name === 'signin';
     const target = VIEWS[name] || VIEWS.home;
     VIEW_IDS.forEach(id => {
       const el = $(id);
@@ -864,7 +879,7 @@ function boot(win, doc) {
       images: state.images,
       eta: $('eta') ? $('eta').value : '',
       notes: $('notes') ? $('notes').value : '',
-      ambulanceId: $('ambulanceId') ? $('ambulanceId').value : '',
+      ambulanceId: auth && auth.ambulance ? auth.ambulance.registration : ($('ambulanceId') ? $('ambulanceId').value : ''),
       face: state.fastState.face, arm: state.fastState.arm, speech: state.fastState.speech,
       onsetHours: $('onsetHours') ? $('onsetHours').value : '',
     };
@@ -1087,11 +1102,266 @@ function boot(win, doc) {
       if (hospital.lat != null && hospital.lng != null) {
         /* geo: hands off to whatever navigation app the crew actually uses.
            GoldenHour is not trying to be a maps app. */
-        nav.setAttribute('href', 'geo:' + hospital.lat + ',' + hospital.lng +
-          '?q=' + hospital.lat + ',' + hospital.lng + '(' + encodeURIComponent(hospital.name || 'Hospital') + ')');
+        nav.setAttribute('href', 'https://www.google.com/maps/dir/?api=1&destination=' + hospital.lat + ',' + hospital.lng + '&travelmode=driving');
+        nav.setAttribute('target', '_blank');
         nav.hidden = false;
       } else nav.hidden = true;
     }
+  }
+
+
+  /* ── This ambulance: sign-in, the phone it runs on, the crew ─────────────
+     Each ambulance has its own login: a one-time code from the GoldenHour
+     administrator, entered once on this phone. The phone then reports what it
+     is every few minutes, and the crew on shift lives with the vehicle. */
+  let heartbeatTimer = null;
+  const fetcher = (u, o) => (typeof win.fetch === 'function' ? win.fetch(u, o) : Promise.reject(new Error('No network')));
+
+  function ambulanceSignedOut(message) {
+    if (state.demo || !auth) return;
+    auth = null; writeAuth(storage, null);
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    const err = $('signinError');
+    if (err) { err.textContent = message || 'This phone was signed out. Enter a new sign-in code from your administrator.'; err.hidden = false; }
+    showView('signin');
+  }
+
+  async function sendHeartbeat() {
+    if (state.demo || !auth) return;
+    try {
+      const b = await ambHeartbeat(fetcher, env.apiRoot, auth.token, await describeDevice(win, storage, isCapacitorRuntime(win)));
+      auth.ambulance = b.ambulance; writeAuth(storage, auth); paintUnit();
+    } catch (e) { if (isSignedOut(e)) ambulanceSignedOut(e.message); }
+  }
+  function startHeartbeat() {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    sendHeartbeat();
+    heartbeatTimer = setInterval(sendHeartbeat, 5 * 60000);
+  }
+
+  on($('signinForm'), 'submit', async e => {
+    e.preventDefault();
+    const code = ($('signinCode') && $('signinCode').value) || '';
+    const err = $('signinError'), btn = $('signinBtn');
+    if (err) err.hidden = true;
+    if (code.replace(/[^0-9a-z]/gi, '').length !== 16) {
+      if (err) { err.textContent = 'The sign-in code has 16 letters and digits.'; err.hidden = false; }
+      return;
+    }
+    if (btn) btn.disabled = true;
+    try {
+      const b = await ambSignIn(fetcher, env.apiRoot, code, await describeDevice(win, storage, isCapacitorRuntime(win)));
+      auth = { token: b.token, ambulance: b.ambulance }; writeAuth(storage, auth);
+      if ($('signinCode')) $('signinCode').value = '';
+      showView('home'); paintUnit(); startHeartbeat();
+      toast('Signed in as ' + b.ambulance.registration);
+    } catch (ex) {
+      if (err) { err.textContent = ex.message; err.hidden = false; }
+    } finally { if (btn) btn.disabled = false; }
+  });
+
+  function paintUnit() {
+    const signed = !!(auth && auth.ambulance);
+    const a = signed ? auth.ambulance : null;
+    const show = (id, v) => { const el = $(id); if (el) el.hidden = !v; };
+    show('unitSigned', signed); show('unitManual', !signed); show('crewCard', signed); show('deviceCard', signed);
+    const sub = doc.querySelector('.brand-sub');
+    if (sub) sub.textContent = signed ? a.registration + (a.unit_name ? ' · ' + a.unit_name : '') : 'Pre-arrival emergency coordination';
+    if (!signed) return;
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v == null || v === '' ? '—' : String(v); };
+    set('unitReg', a.registration); set('unitType', a.vehicle_type || 'Ambulance'); set('unitName', a.unit_name);
+    set('unitOperator', a.operator); set('unitBase', a.base_location);
+    set('unitSince', a.paired_at ? new Date(a.paired_at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+    const list = $('crewList');
+    if (list) {
+      list.textContent = '';
+      (a.crew || []).forEach((m, i) => {
+        const li = doc.createElement('li'); li.className = 'crew-row';
+        const t = doc.createElement('span'); t.className = 'crew-text';
+        const b = doc.createElement('b'); b.textContent = m.name;
+        const r = doc.createElement('span'); r.className = 'crew-role'; r.textContent = m.role;
+        t.appendChild(b); t.appendChild(r);
+        if (m.phone) { const ph = doc.createElement('small'); ph.textContent = m.phone; t.appendChild(ph); }
+        const x = doc.createElement('button'); x.type = 'button'; x.className = 'crew-remove'; x.setAttribute('aria-label', 'Remove ' + m.name); x.textContent = '×';
+        x.addEventListener('click', () => updateCrew((a.crew || []).filter((_, j) => j !== i)));
+        li.appendChild(t); li.appendChild(x); list.appendChild(li);
+      });
+      if (!(a.crew || []).length) { const li = doc.createElement('li'); li.className = 'empty-note'; li.textContent = 'Add who is on this shift.'; list.appendChild(li); }
+    }
+    const d = a.device || {};
+    const rows = [
+      ['Phone', [d.manufacturer, d.model].filter(Boolean).join(' ') || '—'],
+      ['System', d.os ? d.os + (d.os_version ? ' ' + d.os_version : '') : '—'],
+      ['App', d.app_version ? 'GoldenHour ' + d.app_version + (d.platform === 'android' ? ' (Android app)' : ' (browser)') : '—'],
+      ['Screen', d.screen || '—'], ['Battery', d.battery_pct != null ? Math.round(d.battery_pct) + '%' + (d.charging ? ' · charging' : '') : '—'],
+      ['Network', d.network ? d.network.toUpperCase() : '—'], ['Location', d.location_permission || '—'],
+    ];
+    const dl = $('deviceList');
+    if (dl) dl.innerHTML = rows.map(r => '<div class="setting-row"><span class="setting-label">' + escapeHtml(r[0]) + '</span><b class="setting-value">' + escapeHtml(r[1]) + '</b></div>').join('');
+  }
+  function escapeHtml(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+
+  async function updateCrew(crew) {
+    const err = $('crewError'); if (err) err.hidden = true;
+    try {
+      const b = await ambSaveCrew(fetcher, env.apiRoot, auth.token, crew);
+      auth.ambulance = b.ambulance; writeAuth(storage, auth); paintUnit();
+      return true;
+    } catch (e) {
+      if (isSignedOut(e)) { ambulanceSignedOut(e.message); return false; }
+      if (err) { err.textContent = e.message; err.hidden = false; }
+      return false;
+    }
+  }
+  on($('crewAddBtn'), 'click', async () => {
+    if (!auth) return;
+    const name = ($('crewName').value || '').trim();
+    if (!name) { const err = $('crewError'); if (err) { err.textContent = 'Enter a name.'; err.hidden = false; } return; }
+    const roleBtn = doc.querySelector('#crewRoleSeg .seg-btn.is-on');
+    const ok = await updateCrew((auth.ambulance.crew || []).concat([{ name, role: roleBtn ? roleBtn.dataset.value : 'Other', phone: ($('crewPhone').value || '').trim() || null }]));
+    if (ok) { $('crewName').value = ''; $('crewPhone').value = ''; toast('Crew updated'); }
+  });
+  on($('crewRoleSeg'), 'click', e => {
+    const b = e.target.closest('.seg-btn'); if (!b) return;
+    doc.querySelectorAll('#crewRoleSeg .seg-btn').forEach(x => { const onNow = x === b; x.classList.toggle('is-on', onNow); x.setAttribute('aria-checked', onNow ? 'true' : 'false'); });
+  });
+  on($('unitSignOutBtn'), 'click', async () => {
+    if (!auth) return;
+    if (win.confirm && !win.confirm('Sign this phone out of ' + auth.ambulance.registration + '?\n\nYou will need a new code from your administrator to sign in again.')) return;
+    try { await ambSignOut(fetcher, env.apiRoot, auth.token); } catch (_) {}
+    ambulanceSignedOut('Signed out. Enter a new sign-in code from your administrator to sign in again.');
+  });
+
+  /* ── Navigation to the accepting hospital ───────────────────────────────
+     Once an ER accepts, the active case shows the road route on a map, the
+     next turn, every direction, the distance left and the ETA. The route
+     comes from the GoldenHour server (OpenStreetMap roads); the crew's own
+     GPS moves the marker between refreshes. "Navigate" opens the same trip
+     in Google Maps for voice guidance. */
+  const nav = { code: null, timer: null, data: null, map: null, layers: null, userAt: 0, fitted: false, loading: null, resize: null };
+  function loadLeaflet() {
+    if (win.L) return Promise.resolve(win.L);
+    if (nav.loading) return nav.loading;
+    nav.loading = new Promise((resolve, reject) => {
+      const link = doc.createElement('link'); link.rel = 'stylesheet'; link.href = 'vendor/leaflet/leaflet.css'; doc.head.appendChild(link);
+      const sc = doc.createElement('script'); sc.src = 'vendor/leaflet/leaflet.js';
+      sc.onload = () => resolve(win.L); sc.onerror = () => { nav.loading = null; reject(new Error('map unavailable')); };
+      doc.head.appendChild(sc);
+    });
+    return nav.loading;
+  }
+  function startNav(code) {
+    if (state.demo || !code) return;
+    const card = $('navCard'); if (card) card.hidden = false;
+    if (nav.code === code && nav.timer) return;
+    stopNav(true);
+    nav.code = code;
+    refreshNav();
+    nav.timer = setInterval(refreshNav, 15000);
+  }
+  function stopNav(keepCard) {
+    if (nav.timer) { clearInterval(nav.timer); nav.timer = null; }
+    nav.code = null; nav.data = null; nav.fitted = false;
+    if (nav.resize) { try { nav.resize.disconnect(); } catch (_) {} nav.resize = null; }
+    if (nav.map) { try { nav.map.remove(); } catch (_) {} nav.map = null; nav.layers = null; }
+    if (!keepCard) { const card = $('navCard'); if (card) card.hidden = true; }
+  }
+  async function refreshNav() {
+    const code = nav.code; if (!code) return;
+    try {
+      const body = await fetchRoute(fetcher, env.apiRoot, code, crewTokenFor(code));
+      if (nav.code !== code) return;
+      nav.data = body;
+      paintNav();
+    } catch (e) {
+      const note = $('navNote'); if (note) note.textContent = e.network ? 'No signal — showing the last route.' : '';
+    }
+  }
+  const TURN = { left: '←', right: '→', 'slight left': '↖', 'slight right': '↗', 'sharp left': '↙', 'sharp right': '↘', uturn: '↶', straight: '↑' };
+  function turnGlyph(step) {
+    if (!step) return '↑';
+    if (step.type === 'arrive') return '⚑';
+    if (step.type === 'roundabout' || step.type === 'rotary') return '⟳';
+    return TURN[step.modifier] || '↑';
+  }
+  function hereFor(d) { return state.lastFix || (d && d.from) || null; }
+  function paintNav() {
+    const d = nav.data; if (!d) return;
+    const r = d.route, here = hereFor(d);
+    const setT = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    const remainingM = r ? r.distance_m : (d.live && d.live.distance_km != null ? d.live.distance_km * 1000 : (here && d.hospital ? metres(here, d.hospital) : null));
+    const etaMin = d.live && d.live.live_eta_minutes != null ? d.live.live_eta_minutes : (r ? Math.max(1, Math.round(r.duration_s / 60)) : (d.live ? d.live.est_eta_minutes : null));
+    setT('navRemain', formatDistance(remainingM) + (r ? ' by road' : ''));
+    setT('navEta', etaMin != null ? etaMin + ' min' : '—');
+    setT('navArrive', etaMin != null ? new Date(Date.now() + etaMin * 60000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
+    const steps = $('navSteps');
+    if (steps) steps.innerHTML = r && r.steps ? r.steps.map(st => '<li><span class="nav-glyph" aria-hidden="true">' + turnGlyph(st) + '</span><span>' + escapeHtml(st.instruction) + '</span><small>' + escapeHtml(formatDistance(st.distance_m)) + '</small></li>').join('') : '';
+    const box = $('navStepsBox'); if (box) box.hidden = !(r && r.steps && r.steps.length);
+    const note = $('navNote');
+    if (note) note.textContent = r ? 'Route on OpenStreetMap roads, updated as you drive. ' + (d.hospital && d.hospital.source === 'desk' ? 'Ends at the ER desk’s location.' : 'Ends at the hospital’s address.')
+      : 'Road route unavailable — the line shows the direction to the hospital.';
+    if (d.navigate_url) { const n = $('navBtn'); if (n) { n.setAttribute('href', d.navigate_url); n.hidden = false; } }
+    paintNavPosition();
+    loadLeaflet().then(drawNavMap).catch(() => { const m = $('navMap'); if (m) m.hidden = true; });
+  }
+  function paintNavPosition() {
+    const d = nav.data; if (!d) return;
+    const here = hereFor(d), r = d.route;
+    const nx = r ? nextStep(r.steps, here) : null;
+    const setT = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    if (nx) { setT('navNextDist', formatDistance(nx.metres)); setT('navNextText', nx.step.instruction); setT('navTurnIcon', turnGlyph(nx.step)); }
+    else { setT('navNextDist', here && d.hospital ? formatDistance(metres(here, d.hospital)) : '—'); setT('navNextText', 'Head to ' + ((d.hospital && d.hospital.name) || 'the hospital')); setT('navTurnIcon', '↑'); }
+    if (nav.map && nav.layers && here) {
+      nav.layers.me.setLatLng([here.lat, here.lng]);
+      /* Follow the ambulance, unless the crew has just moved the map by hand. */
+      if (Date.now() - nav.userAt > 20000 && nav.fitted && !nav.map.getBounds().pad(-0.2).contains([here.lat, here.lng])) {
+        nav.map.panTo([here.lat, here.lng], { animate: true });
+      }
+    }
+  }
+  function drawNavMap(L) {
+    const d = nav.data, el = $('navMap'); if (!d || !el || !L) return;
+    el.hidden = false;
+    const here = hereFor(d), hosp = d.hospital && d.hospital.lat != null ? [d.hospital.lat, d.hospital.lng] : null;
+    if (!nav.map) {
+      nav.map = L.map(el, { zoomControl: true, attributionControl: true });
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors', referrerPolicy: 'strict-origin-when-cross-origin' }).addTo(nav.map);
+      nav.map.on('dragstart', () => { nav.userAt = Date.now(); });
+      const dot = (cls, size) => L.divIcon({ className: '', html: '<div class="' + cls + '"></div>', iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+      nav.layers = {
+        casing: L.polyline([], { color: '#5A2A06', weight: 9, opacity: 0.35 }).addTo(nav.map),
+        route: L.polyline([], { color: '#F59E0B', weight: 6, opacity: 0.95 }).addTo(nav.map),
+        line: L.polyline([], { color: '#D9622B', weight: 2, dashArray: '6 6' }).addTo(nav.map),
+        hosp: L.marker(hosp || [0, 0], { icon: dot('nav-hosp', 26), keyboard: false }).addTo(nav.map),
+        me: L.marker(here ? [here.lat, here.lng] : [0, 0], { icon: dot('nav-me', 22), keyboard: false, zIndexOffset: 500 }).addTo(nav.map),
+      };
+      /* The card can be created while hidden (0 × 0): measure again whenever
+         its size changes, and frame the route only once it has a size. */
+      if (typeof win.ResizeObserver === 'function') {
+        nav.resize = new win.ResizeObserver(() => {
+          if (!nav.map) return;
+          try { nav.map.invalidateSize(); } catch (_) {}
+          if (!nav.fitted) fitNav(L);
+        });
+        nav.resize.observe(el);
+      }
+    }
+    const geom = d.route && d.route.geometry ? d.route.geometry : [];
+    nav.layers.casing.setLatLngs(geom); nav.layers.route.setLatLngs(geom);
+    nav.layers.line.setLatLngs(!geom.length && here && hosp ? [[here.lat, here.lng], hosp] : []);
+    if (hosp) nav.layers.hosp.setLatLng(hosp).bindTooltip((d.hospital && d.hospital.name) || 'Hospital');
+    if (here) nav.layers.me.setLatLng([here.lat, here.lng]);
+    try { nav.map.invalidateSize(); } catch (_) {}
+    if (!nav.fitted) fitNav(L);
+  }
+  function fitNav(L) {
+    const d = nav.data, el = $('navMap');
+    if (!d || !nav.map || !el || !el.clientWidth || !el.clientHeight) return;
+    const here = hereFor(d), hosp = d.hospital && d.hospital.lat != null ? [d.hospital.lat, d.hospital.lng] : null;
+    const geom = d.route && d.route.geometry ? d.route.geometry : [];
+    const pts = geom.length ? geom : [here ? [here.lat, here.lng] : null, hosp].filter(Boolean);
+    if (pts.length > 1) nav.map.fitBounds(L.latLngBounds(pts).pad(0.15), { maxZoom: 16 }); else if (pts.length) nav.map.setView(pts[0], 15);
+    nav.fitted = true;
   }
 
   /* ── Status polling ──────────────────────────────────────────────────── */
@@ -1140,8 +1410,8 @@ function boot(win, doc) {
       if (body.eta_source) extra.eta_source = body.eta_source;
       caseBook.setStatus(state.activeCaseCode, body.status, extra);
     }
-    if (body.status === 'ACCEPTED') startSharingPosition(body);
-    if (['ARRIVED', 'CANCELLED', 'EXPIRED', 'REJECTED'].includes(body.status)) stopSharingPosition();
+    if (body.status === 'ACCEPTED') { startSharingPosition(body); startNav(state.activeCaseCode); }
+    if (['ARRIVED', 'CANCELLED', 'EXPIRED', 'REJECTED'].includes(body.status)) { stopSharingPosition(); stopNav(); }
     if (body.status === 'ACCEPTED') paintTracking(body);
     if (body.status === 'ARRIVED') {
       const banner = $('arrivedBanner');
@@ -1190,6 +1460,11 @@ function boot(win, doc) {
     geoWatch = watchPosition({ native: isCapacitorRuntime(win), plugin: Geolocation, geolocation: geo,
       onPosition: pos => {
         if (state.activeCaseCode !== code || (caseBook.get(code) || {}).status !== 'ACCEPTED') return;
+        const c0 = pos && pos.coords;
+        if (c0 && Number.isFinite(c0.latitude) && Number.isFinite(c0.longitude)) {
+          state.lastFix = { lat: c0.latitude, lng: c0.longitude, accuracy: c0.accuracy, at: Date.now() };
+          paintNavPosition();
+        }
         const now = Date.now();
         if (inFlight || now - lastSent < 10000) return;
         const checked = fixFromPosition(pos, now);
@@ -1725,10 +2000,18 @@ function boot(win, doc) {
   refreshNeeds();
   renderOutbox();
   renderHome();
+  if (!state.demo) auth = readAuth(storage);
+  paintUnit();
   renderSettings();
   locate();
   refreshSubmitHint();
   showView('home');
+  if (!state.demo && auth) startHeartbeat();
+  if (!state.demo && auth) {
+    on(win, 'online', sendHeartbeat);
+    const cur = caseBook.current();
+    if (cur && cur.status === 'ACCEPTED') startNav(cur.case_code);
+  }
 
   if (state.demo) {
     setNetPill('demo');

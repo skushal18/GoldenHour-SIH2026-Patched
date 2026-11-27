@@ -61,6 +61,19 @@ router.post('/logout', requireAuth(null, { allowPasswordChange: true }), async (
   catch (err) { next(err); }
 });
 
+/* An ambulance's phone signs in with the one-time code from the
+   administrator, and reports the phone it is installed on. */
+router.post('/ambulance/pair', activationLimiter, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const r = await require('../services/ambulanceService').pair(b.code, b.device);
+    if (!r.ok) return res.status(r.status).json({ success: false, reason: r.reason, message: r.message });
+    audit.record('ADMIN', 'AMBULANCE_SIGNED_IN', { ambulance_id: r.ambulance.ambulance_id, registration: r.ambulance.registration,
+      model: r.ambulance.device && r.ambulance.device.model }, { kind: 'ambulance' });
+    res.json({ success: true, token: r.token, expires_in: r.expires_in, ambulance: r.ambulance });
+  } catch (err) { next(err); }
+});
+
 router.post('/activate/lookup', activationLimiter, async (req, res, next) => {
   try {
     const result = await auth.lookupActivation((req.body || {}).code);

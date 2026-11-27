@@ -19,10 +19,13 @@ const express = require('express');
 const router = express.Router();
 
 const { CASE_TYPES } = require('../data/caseTypes');
-const { createBroadcast, cancelBroadcast, markArrived, toAmbulanceStatus, crewTokenValid, recordPosition } = require('../services/broadcastService');
+const { createBroadcast, cancelBroadcast, markArrived, toAmbulanceStatus, crewTokenValid, recordPosition, hospitalEnd } = require('../services/broadcastService');
+const routing = require('../services/routingService');
+const tracking = require('../services/trackingService');
 const { getStore } = require('../store');
 const { validateBroadcast } = require('../services/validation');
 const { createRateLimiter } = require('../middleware/protect');
+const ambulances = require('../services/ambulanceService');
 
 /* ── Idempotency ────────────────────────────────────────────────────────────
    client_request_id -> { case_code, expires }. In-process because the
@@ -51,6 +54,20 @@ router.post('/requests', broadcastLimiter, async (req, res, next) => {
   const body = req.body || {};
   const crid = req.get('X-Client-Request-Id') || body.client_request_id || null;
 
+  /* Which ambulance is sending this. A token, when sent, must be good; with
+     none, the case is refused where ambulance sign-in is required
+     (production) and sent unattributed elsewhere (development, tests). */
+  let unit = null;
+  const auth = req.get('Authorization') || '';
+  const token = /^Bearer\s+(.+)$/i.test(auth) ? auth.replace(/^Bearer\s+/i, '').trim() : null;
+  if (token || ambulances.required()) {
+    let v;
+    try { v = await ambulances.verify(token); } catch (err) { return next(err); }
+    if (!v.ok) return res.status(v.status).json({ success: false, reason: v.reason, message: v.message });
+    unit = ambulances.caseStamp(v.ambulance);
+  }
+
+
   if (crid && idemMap.has(crid)) {
     const entry = idemMap.get(crid);
     if (entry.expires > Date.now()) {
@@ -77,7 +94,7 @@ router.post('/requests', broadcastLimiter, async (req, res, next) => {
   }
 
   try {
-    const record = await createBroadcast(body, req.app.get('io'));
+    const record = await createBroadcast(body, req.app.get('io'), { ambulance: unit });
     /* The replay entry keeps the crew token so a retried POST (offline
        outbox, double flush) hands the same ambulance the same token. It
        lives only in process memory, for REQUEST_IDEMPOTENCY_TTL_MS. */
@@ -160,6 +177,34 @@ router.post('/requests/:code/position', positionLimiter, async (req, res, next) 
       return res.status(status).json({ success: false, reason: r.reason, message: r.message });
     }
     res.json({ success: true, message: r.message, approximate: !!r.approximate });
+  } catch (err) { next(err); }
+});
+
+/* Navigation for the crew once a hospital has accepted: the road route from
+   where the ambulance is now (its last GPS fix, else where it sent the case
+   from) to the hospital end, turn-by-turn directions, and a link that opens
+   the same trip in the phone's maps app. */
+router.get('/requests/:code/route', readLimiter, async (req, res, next) => {
+  try {
+    const record = await loadForCrew(req, res);
+    if (!record) return;
+    if (record.status !== 'ACCEPTED' && record.status !== 'ARRIVED') {
+      return res.status(409).json({ success: false, reason: 'NOT_ACCEPTED', message: 'No hospital has accepted this case yet.' });
+    }
+    const winner = record.targets.find(t => t.hospital_id === record.accepted_hospital_id) || {};
+    const end = hospitalEnd(record);
+    const live = tracking.snapshot(record.case_code);
+    const lp = live.last_position;
+    const from = lp ? { lat: lp.lat, lng: lp.lng } : (record.origin && record.origin.lat != null ? { lat: record.origin.lat, lng: record.origin.lng } : null);
+    const route = record.status === 'ACCEPTED' && end && from ? await routing.routeFor(record.case_code, from, { lat: end.lat, lng: end.lng }) : null;
+    res.json({
+      success: true, case_code: record.case_code, status: record.status,
+      hospital: { name: winner.name || null, phone: winner.contact || null, lat: end ? end.lat : null, lng: end ? end.lng : null, source: end ? end.source : null },
+      from: from ? Object.assign({ source: lp ? 'gps' : 'sent-from', at: lp ? lp.at : record.created_at }, from) : null,
+      route,
+      live: { distance_km: live.distance_km == null ? null : live.distance_km, live_eta_minutes: live.live_eta_minutes, est_eta_minutes: live.est_eta_minutes, eta_source: live.eta_source },
+      navigate_url: end ? 'https://www.google.com/maps/dir/?api=1&destination=' + end.lat + ',' + end.lng + '&travelmode=driving' : null,
+    });
   } catch (err) { next(err); }
 });
 
