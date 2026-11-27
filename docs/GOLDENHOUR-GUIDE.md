@@ -9,7 +9,7 @@
 | **ER desk** (sign in) | https://d1k7k7ahunvfhc.cloudfront.net/hospital/ | Hospital emergency teams |
 | **Hospital activation** (first time only) | https://d1k7k7ahunvfhc.cloudfront.net/hospital/#activate | A hospital with an activation code |
 | **Ambulance app** (in a browser) | https://d1k7k7ahunvfhc.cloudfront.net/ambulance/ | Ambulance crews |
-| Ambulance app (Android APK) | GitHub → Actions → **Build GoldenHour APK** → latest run → `goldenhour-apk` | Ambulance crews |
+| Ambulance app (Android APK) | GitHub → Actions → **Build GoldenHour APK** → latest run → `goldenhour-apk` | Ambulance crews (sign in with the code from the administrator) |
 | Server status | https://d1k7k7ahunvfhc.cloudfront.net/health | Administrator |
 | Wake the server | https://d1k7k7ahunvfhc.cloudfront.net/wake | Anyone (see "Sleeping" below) |
 
@@ -45,11 +45,28 @@ One hospital at a time: the form on the right (**Create a hospital login**) — 
 
 On the desk: **Accept** a case to take the patient (the first hospital to accept gets it), watch the ambulance on the map, mark **Arrived**. A desk only ever sees cases offered to its own hospital.
 
+## Register the ambulances (administrator)
+
+Every ambulance has its own login. A case can only be sent from a signed-in ambulance.
+
+1. Admin console → **Ambulances** → fill in the **registration number** (e.g. `KA01AB1234`), unit name, operator, type, base and vehicle phone → **Register and get a sign-in code**.
+2. The **sign-in code** (16 letters and digits) is shown **once**. Give it to the crew of that ambulance. It works once and expires after 7 days.
+3. The table then shows, for every ambulance: **Signed in / Waiting for sign-in / Switched off**, **online or offline**, the **phone the app is installed on** (make, model, Android version, app version, battery, network, location permission), the **crew on shift**, and the **case it is on now**.
+4. **Sign in a new phone** (or **New sign-in code**) issues a fresh code and signs the old phone out at once — use it when a phone is lost or replaced. **Switch off** stops the ambulance sending cases; switching it on again needs a new code.
+
 ## Ambulance crews
 
-1. Open https://d1k7k7ahunvfhc.cloudfront.net/ambulance/ on the phone (or install the APK). No sign-in.
-2. **Start new alert** → case type, patient details → **Send**. Allow location, or enter coordinates by hand.
-3. The case goes to every hospital **with an active GoldenHour login** within the chosen radius (15 km by default) — so a hospital must have activated before it can receive cases. If none is in range, the app lists nearby hospitals to phone.
+1. Install the APK (or open https://d1k7k7ahunvfhc.cloudfront.net/ambulance/ on the phone).
+2. The first time: **Sign in this ambulance** → type the code from your administrator. You do this once on the phone that rides in the ambulance.
+3. **Settings → Crew on shift**: add who is on board (name, role, phone). Your administrator sees it.
+4. **Start new alert** → what happened, patient, vitals → **Broadcast**. Allow location. The case goes to every hospital **with an active GoldenHour login** within the radius (15 km by default). If none is in range, the app lists nearby hospitals to phone.
+5. When an ER accepts, the active case shows **the route on a map, the next turn, all directions, the distance by road and the ETA**. **Navigate** opens the same trip in Google Maps for voice guidance; **Call** rings the ER. Keep the app open so the hospital can see you coming.
+6. **Reached hospital** closes the case.
+
+## Signing in and out (ER desks and administrators)
+
+- Leave GoldenHour for **more than 5 minutes** (close the tab or the browser) and the next visit asks for the password again. A desk screen that stays open stays signed in.
+- The **admin console** also signs out after **30 minutes** without activity.
 
 ## Sleeping (saves money)
 
